@@ -109,6 +109,24 @@ button.ghost {
 }
 button.ghost:hover { background: var(--bg); }
 
+button.danger {
+  background: var(--error);
+  color: white;
+}
+button.danger:hover { background: #b91c1c; }
+
+button.icon-danger {
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  font-size: 13px;
+}
+button.icon-danger:hover {
+  background: #fee2e2;
+  border-color: var(--error);
+}
+
 .toolbar {
   display: flex;
   gap: 12px;
