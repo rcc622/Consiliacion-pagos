@@ -8,7 +8,36 @@ const MONTHS = [
   "Enero","Febrero","Marzo","Abril","Mayo","Junio",
   "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
 ];
-const METHODS = ["Contado","Financiado"];
+const ZONES = [
+  "Monterrey","Saltillo","Chihuahua","MTY Foraneo","FORANEO","COMERCIAL MTY",
+];
+const METHODS = [
+  "Contado Riguroso-Direc",
+  "Contado Riguroso-Mejoravit",
+  "Contado Parcial-Direc",
+  "Contado Parcial-Mejoravit",
+  "Anticipo Mejoravit-MSI",
+  "Anticipo Mejoravit 24 MSI",
+  "FIDE",
+  "FIDE-DIRECTO",
+  "Financiamiento",
+  "3 Meses Sin Intereses",
+  "6 Meses Sin Intereses",
+  "10 Meses Sin Intereses",
+  "12 Meses Sin Intereses",
+  "18 Meses Sin Intereses",
+  "24 Meses Sin Intereses",
+];
+
+// Construye opciones para un select de un catalogo cerrado, agregando el
+// valor actual si quedo fuera del catalogo (para no romper datos legacy).
+function catalogOptions(catalog, currentValue) {
+  const opts = [{ value: "", label: "—" }, ...catalog.map((v) => ({ value: v, label: v }))];
+  if (currentValue && !catalog.includes(currentValue)) {
+    opts.push({ value: currentValue, label: currentValue });
+  }
+  return opts;
+}
 
 let selected = new Set();
 
@@ -328,14 +357,17 @@ async function editClientFlow(client, vendors, refresh) {
         name: "payment_month", label: "Mes", type: "select", value: client.payment_month || "",
         options: [{ value: "", label: "—" }, ...MONTHS.map((m) => ({ value: m, label: m }))],
       },
-      { name: "zone", label: "Zona", type: "text", value: client.zone || "" },
+      {
+        name: "zone", label: "Zona", type: "select", value: client.zone || "",
+        options: catalogOptions(ZONES, client.zone),
+      },
       {
         name: "vendor_id", label: "Vendedor", type: "select", value: client.vendor_id || "",
         options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
       },
       {
         name: "payment_method", label: "Método de pago", type: "select", value: client.payment_method || "",
-        options: [{ value: "", label: "—" }, ...METHODS.map((m) => ({ value: m, label: m }))],
+        options: catalogOptions(METHODS, client.payment_method),
       },
       { name: "amount", label: "Monto ($)", type: "number", value: client.amount ?? "" },
     ],
@@ -377,7 +409,10 @@ function bulkEditSelectedFlow(ids, vendors, refresh) {
 
     const form = document.createElement("form");
 
-    const zoneRow = makeOptionalField({ label: "Zona", type: "text" });
+    const zoneRow = makeOptionalField({
+      label: "Zona", type: "select",
+      options: ZONES.map((z) => ({ value: z, label: z })),
+    });
     const vendorRow = makeOptionalField({
       label: "Vendedor asignado", type: "select",
       options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
@@ -570,12 +605,11 @@ function openImportModal(vendors) {
     const note = document.createElement("p");
     note.className = "muted";
     note.style.margin = "0";
-    note.textContent = "Lo que selecciones aquí se aplica a TODAS las filas y sobrescribe lo que diga el CSV. Si dejas en \"Usar columna del CSV\", se respeta el archivo.";
+    note.textContent = "Zona y mes se leen automáticamente del archivo. Si seleccionas un vendedor aquí, se aplica a TODAS las filas; si no, se usa la columna vendedor_email del CSV.";
     modal.appendChild(note);
 
     const form = document.createElement("form");
 
-    // File input
     const fileLabel = document.createElement("label");
     fileLabel.textContent = "Archivo CSV / Excel";
     const fileInput = document.createElement("input");
@@ -585,7 +619,6 @@ function openImportModal(vendors) {
     fileLabel.appendChild(fileInput);
     form.appendChild(fileLabel);
 
-    // Vendedor por defecto
     const vendorLabel = document.createElement("label");
     vendorLabel.textContent = "Vendedor (aplica a todos)";
     const vendorSelect = document.createElement("select");
@@ -596,25 +629,6 @@ function openImportModal(vendors) {
     vendorLabel.appendChild(vendorSelect);
     form.appendChild(vendorLabel);
 
-    // Zona por defecto (texto libre porque las zonas son abiertas)
-    const zoneLabel = document.createElement("label");
-    zoneLabel.textContent = "Zona (aplica a todos)";
-    const zoneInput = document.createElement("input");
-    zoneInput.type = "text";
-    zoneInput.placeholder = "Vacío = usar columna del CSV";
-    zoneLabel.appendChild(zoneInput);
-    form.appendChild(zoneLabel);
-
-    // Mes por defecto
-    const monthLabel = document.createElement("label");
-    monthLabel.textContent = "Mes (aplica a todos)";
-    const monthSelect = document.createElement("select");
-    monthSelect.appendChild(opt("", "— Usar columna del CSV —"));
-    for (const m of MONTHS) monthSelect.appendChild(opt(m, m));
-    monthLabel.appendChild(monthSelect);
-    form.appendChild(monthLabel);
-
-    // Actions
     const actions = document.createElement("div");
     actions.className = "actions";
 
@@ -641,11 +655,7 @@ function openImportModal(vendors) {
       backdrop.remove();
       resolve({
         file,
-        defaults: {
-          vendor_id:     vendorSelect.value || null,
-          zone:          zoneInput.value.trim() || null,
-          payment_month: monthSelect.value || null,
-        },
+        defaults: { vendor_id: vendorSelect.value || null },
       });
     };
 
@@ -680,14 +690,17 @@ async function addClientFlow(refresh) {
         name: "payment_month", label: "Mes", type: "select",
         options: [{ value: "", label: "—" }, ...MONTHS.map((m) => ({ value: m, label: m }))],
       },
-      { name: "zone", label: "Zona", type: "text" },
+      {
+        name: "zone", label: "Zona", type: "select",
+        options: catalogOptions(ZONES, ""),
+      },
       {
         name: "vendor_id", label: "Vendedor", type: "select",
         options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
       },
       {
         name: "payment_method", label: "Método de pago", type: "select",
-        options: [{ value: "", label: "—" }, ...METHODS.map((m) => ({ value: m, label: m }))],
+        options: catalogOptions(METHODS, ""),
       },
       { name: "amount", label: "Monto ($)", type: "number" },
     ],
