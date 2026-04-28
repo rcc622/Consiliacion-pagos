@@ -42,37 +42,50 @@ function normalizeRow(row) {
 // Inserta cada fila en clients haciendo lookup de vendor_id por email.
 // El lookup ignora mayusculas/minusculas y espacios, y trae a TODOS los
 // vendedores en una sola consulta para evitar problemas de casing en .in().
+//
+// `defaults` permite forzar valores en bloque (sobrescriben el CSV):
+//   { vendor_id, zone, payment_month }
+//
 // Retorna { inserted, errors:[{row, reason}] }.
-export async function importRows(rows) {
-  const { data, error } = await sb
-    .from("profiles")
-    .select("id, email")
-    .eq("role", "vendor");
-  if (error) throw error;
+export async function importRows(rows, defaults = {}) {
+  const defaultVendor = defaults.vendor_id || null;
+  const defaultZone   = defaults.zone || null;
+  const defaultMonth  = defaults.payment_month || null;
 
-  const vendorByEmail = new Map(
-    (data || []).map((v) => [(v.email || "").trim().toLowerCase(), v.id])
-  );
+  let vendorByEmail = new Map();
+  if (!defaultVendor) {
+    const { data, error } = await sb
+      .from("profiles")
+      .select("id, email")
+      .eq("role", "vendor");
+    if (error) throw error;
+    vendorByEmail = new Map(
+      (data || []).map((v) => [(v.email || "").trim().toLowerCase(), v.id])
+    );
+  }
 
   const toInsert = [];
   const errors = [];
   for (const r of rows) {
-    if (!r.vendedor_email) {
-      errors.push({ row: r, reason: "Sin vendedor_email" });
-      continue;
-    }
-    const key = r.vendedor_email.trim().toLowerCase();
-    const vid = vendorByEmail.get(key);
+    let vid = defaultVendor;
     if (!vid) {
-      errors.push({ row: r, reason: `Vendedor no encontrado: ${r.vendedor_email}` });
-      continue;
+      if (!r.vendedor_email) {
+        errors.push({ row: r, reason: "Sin vendedor (ni en CSV ni en selector)" });
+        continue;
+      }
+      const key = r.vendedor_email.trim().toLowerCase();
+      vid = vendorByEmail.get(key);
+      if (!vid) {
+        errors.push({ row: r, reason: `Vendedor no encontrado: ${r.vendedor_email}` });
+        continue;
+      }
     }
     const amount = r.monto === "" ? null : Number(String(r.monto).replace(/[^0-9.\-]/g, ""));
     toInsert.push({
       name: r.cliente,
-      zone: r.zona || null,
+      zone: defaultZone || r.zona || null,
       vendor_id: vid,
-      payment_month:  r.mes    || null,
+      payment_month:  defaultMonth || r.mes    || null,
       payment_method: r.metodo || null,
       amount: Number.isFinite(amount) ? amount : null,
     });

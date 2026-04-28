@@ -524,29 +524,142 @@ async function bulkDeleteFlow(refresh) {
   refresh();
 }
 
-function triggerImport(refresh) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".csv,.xlsx,.xls";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    try {
-      const rows = await parseFile(file);
-      if (!rows.length) { toast("El archivo no tiene filas válidas.", "error"); return; }
-      const { inserted, errors } = await importRows(rows);
-      toast(`Insertados: ${inserted}. Errores: ${errors.length}.`, errors.length ? "info" : "success");
-      if (errors.length) {
-        for (const e of errors.slice(0, 5)) {
-          toast(`${e.row.cliente || "(sin nombre)"} → ${e.reason}`, "error", 5000);
-        }
+async function triggerImport(refresh) {
+  const { data: vendors, error } = await sb
+    .from("profiles")
+    .select("id, email, full_name")
+    .eq("role", "vendor")
+    .order("full_name");
+  if (error) { toast(error.message, "error"); return; }
+  if (!vendors?.length) {
+    toast("No hay vendedores registrados. Crea al menos uno antes de importar.", "error");
+    return;
+  }
+
+  const params = await openImportModal(vendors);
+  if (!params) return;
+
+  try {
+    const rows = await parseFile(params.file);
+    if (!rows.length) { toast("El archivo no tiene filas válidas.", "error"); return; }
+    const { inserted, errors } = await importRows(rows, params.defaults);
+    toast(`Insertados: ${inserted}. Errores: ${errors.length}.`, errors.length ? "info" : "success");
+    if (errors.length) {
+      for (const e of errors.slice(0, 5)) {
+        toast(`${e.row.cliente || "(sin nombre)"} → ${e.reason}`, "error", 5000);
       }
-      refresh();
-    } catch (e) {
-      toast(`Import falló: ${e.message || e}`, "error");
     }
-  };
-  input.click();
+    refresh();
+  } catch (e) {
+    toast(`Import falló: ${e.message || e}`, "error");
+  }
+}
+
+function openImportModal(vendors) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+
+    const modal = document.createElement("div");
+    modal.className = "modal";
+
+    const h = document.createElement("h2");
+    h.textContent = "Importar lista de clientes";
+    modal.appendChild(h);
+
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.style.margin = "0";
+    note.textContent = "Lo que selecciones aquí se aplica a TODAS las filas y sobrescribe lo que diga el CSV. Si dejas en \"Usar columna del CSV\", se respeta el archivo.";
+    modal.appendChild(note);
+
+    const form = document.createElement("form");
+
+    // File input
+    const fileLabel = document.createElement("label");
+    fileLabel.textContent = "Archivo CSV / Excel";
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".csv,.xlsx,.xls";
+    fileInput.required = true;
+    fileLabel.appendChild(fileInput);
+    form.appendChild(fileLabel);
+
+    // Vendedor por defecto
+    const vendorLabel = document.createElement("label");
+    vendorLabel.textContent = "Vendedor (aplica a todos)";
+    const vendorSelect = document.createElement("select");
+    vendorSelect.appendChild(opt("", "— Usar columna del CSV —"));
+    for (const v of vendors) {
+      vendorSelect.appendChild(opt(v.id, v.full_name || v.email));
+    }
+    vendorLabel.appendChild(vendorSelect);
+    form.appendChild(vendorLabel);
+
+    // Zona por defecto (texto libre porque las zonas son abiertas)
+    const zoneLabel = document.createElement("label");
+    zoneLabel.textContent = "Zona (aplica a todos)";
+    const zoneInput = document.createElement("input");
+    zoneInput.type = "text";
+    zoneInput.placeholder = "Vacío = usar columna del CSV";
+    zoneLabel.appendChild(zoneInput);
+    form.appendChild(zoneLabel);
+
+    // Mes por defecto
+    const monthLabel = document.createElement("label");
+    monthLabel.textContent = "Mes (aplica a todos)";
+    const monthSelect = document.createElement("select");
+    monthSelect.appendChild(opt("", "— Usar columna del CSV —"));
+    for (const m of MONTHS) monthSelect.appendChild(opt(m, m));
+    monthLabel.appendChild(monthSelect);
+    form.appendChild(monthLabel);
+
+    // Actions
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "ghost";
+    cancel.textContent = "Cancelar";
+    cancel.onclick = () => { backdrop.remove(); resolve(null); };
+
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.textContent = "Importar";
+
+    actions.append(cancel, submit);
+    form.appendChild(actions);
+    modal.appendChild(form);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      backdrop.remove();
+      resolve({
+        file,
+        defaults: {
+          vendor_id:     vendorSelect.value || null,
+          zone:          zoneInput.value.trim() || null,
+          payment_month: monthSelect.value || null,
+        },
+      });
+    };
+
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve(null); }
+    });
+  });
+}
+
+function opt(value, label) {
+  const o = document.createElement("option");
+  o.value = value;
+  o.textContent = label;
+  return o;
 }
 
 async function addClientFlow(refresh) {
