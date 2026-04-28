@@ -1,0 +1,127 @@
+-- Consiliacion-pagos: schema + RLS
+-- Ejecutar UNA SOLA VEZ en el SQL Editor de Supabase tras crear el proyecto.
+
+-- Extensiones --------------------------------------------------------------
+create extension if not exists "pgcrypto";
+
+-- profiles -----------------------------------------------------------------
+-- Espejo de auth.users con metadata propia. Se llena manualmente o via trigger.
+create table if not exists public.profiles (
+  id          uuid primary key references auth.users(id) on delete cascade,
+  email       text not null,
+  full_name   text,
+  role        text not null check (role in ('vendor','master')),
+  zone        text,
+  created_at  timestamptz not null default now()
+);
+
+-- Trigger para crear profile vacio cuando se crea un usuario en auth.users.
+-- Se asigna 'vendor' por defecto; el master se promueve a mano con un UPDATE.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, role)
+  values (new.id, new.email, 'vendor')
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- clients ------------------------------------------------------------------
+create table if not exists public.clients (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  zone        text,
+  vendor_id   uuid references public.profiles(id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists clients_vendor_idx on public.clients(vendor_id);
+create index if not exists clients_zone_idx   on public.clients(zone);
+
+-- payments_report ----------------------------------------------------------
+create table if not exists public.payments_report (
+  client_id     uuid primary key references public.clients(id) on delete cascade,
+  vendor_id     uuid not null references public.profiles(id) on delete cascade,
+  months_paid   int           check (months_paid >= 0),
+  total_amount  numeric(12,2) check (total_amount >= 0),
+  reported_at   timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists pr_vendor_idx on public.payments_report(vendor_id);
+
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_pr_updated_at on public.payments_report;
+create trigger trg_pr_updated_at
+  before update on public.payments_report
+  for each row execute function public.touch_updated_at();
+
+-- RLS ----------------------------------------------------------------------
+alter table public.profiles        enable row level security;
+alter table public.clients         enable row level security;
+alter table public.payments_report enable row level security;
+
+-- profiles: cada usuario lee su propio renglon; el master lee todos.
+drop policy if exists profiles_self_read   on public.profiles;
+drop policy if exists profiles_master_read on public.profiles;
+drop policy if exists profiles_self_update on public.profiles;
+
+create policy profiles_self_read on public.profiles
+  for select using (id = auth.uid());
+
+create policy profiles_master_read on public.profiles
+  for select using (
+    (select role from public.profiles where id = auth.uid()) = 'master'
+  );
+
+create policy profiles_self_update on public.profiles
+  for update using (id = auth.uid());
+
+-- clients: vendor solo ve los suyos; master lee y escribe todo.
+drop policy if exists clients_vendor_select on public.clients;
+drop policy if exists clients_master_all    on public.clients;
+
+create policy clients_vendor_select on public.clients
+  for select using (
+    vendor_id = auth.uid()
+    or (select role from public.profiles where id = auth.uid()) = 'master'
+  );
+
+create policy clients_master_all on public.clients
+  for all using (
+    (select role from public.profiles where id = auth.uid()) = 'master'
+  ) with check (
+    (select role from public.profiles where id = auth.uid()) = 'master'
+  );
+
+-- payments_report: vendor lee/escribe lo suyo; master lee todo.
+drop policy if exists pr_vendor_rw     on public.payments_report;
+drop policy if exists pr_master_select on public.payments_report;
+
+create policy pr_vendor_rw on public.payments_report
+  for all using (vendor_id = auth.uid())
+  with check (vendor_id = auth.uid());
+
+create policy pr_master_select on public.payments_report
+  for select using (
+    (select role from public.profiles where id = auth.uid()) = 'master'
+  );
