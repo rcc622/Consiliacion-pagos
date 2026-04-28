@@ -95,6 +95,52 @@ export function openModal({ title, fields = [], submitLabel = "Guardar" }) {
   });
 }
 
+// Confirmacion simple. Devuelve Promise<boolean>.
+export function confirmDialog({ title, message, confirmLabel = "Confirmar", danger = false }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+
+    const modal = document.createElement("div");
+    modal.className = "modal";
+
+    const h = document.createElement("h2");
+    h.textContent = title;
+    modal.appendChild(h);
+
+    if (message) {
+      const p = document.createElement("p");
+      p.textContent = message;
+      p.style.margin = "0";
+      modal.appendChild(p);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "ghost";
+    cancel.textContent = "Cancelar";
+    cancel.onclick = () => { backdrop.remove(); resolve(false); };
+
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = danger ? "danger" : "";
+    ok.textContent = confirmLabel;
+    ok.onclick = () => { backdrop.remove(); resolve(true); };
+
+    actions.append(cancel, ok);
+    modal.appendChild(actions);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve(false); }
+    });
+  });
+}
+
 // Crea una tabla a partir de columnas y filas. columns: [{key, label, render?}]
 export function buildTable(columns, rows) {
   const wrap = document.createElement("div");

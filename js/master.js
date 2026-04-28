@@ -1,7 +1,7 @@
 // Vista master: dashboard de progreso por vendedor / zona + import + alta manual.
 
 import { sb } from "./supabase.js";
-import { clear, toast, openModal, fmtMoney } from "./ui.js";
+import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
 import { parseFile, importRows } from "./import.js";
 
 export async function renderMaster() {
@@ -43,7 +43,7 @@ export async function renderMaster() {
   paintTopSummary(summary, clients, reports);
   paintByVendor(byVendorWrap, vendors, clients, reports);
   paintByZone(byZoneWrap, clients, reports);
-  paintDetail(detailWrap, vendors, clients, reports);
+  paintDetail(detailWrap, vendors, clients, reports, () => renderMaster());
 }
 
 function buildToolbar(refresh) {
@@ -62,7 +62,12 @@ function buildToolbar(refresh) {
   const spacer = document.createElement("div");
   spacer.className = "spacer";
 
-  bar.append(importBtn, addBtn, spacer);
+  const wipeBtn = document.createElement("button");
+  wipeBtn.className = "danger";
+  wipeBtn.textContent = "Vaciar lista";
+  wipeBtn.onclick = () => bulkDeleteFlow(refresh);
+
+  bar.append(importBtn, addBtn, spacer, wipeBtn);
   return bar;
 }
 
@@ -188,7 +193,7 @@ function paintByZone(container, clients, reports) {
   container.appendChild(table);
 }
 
-function paintDetail(container, vendors, clients, reports) {
+function paintDetail(container, vendors, clients, reports, refresh) {
   clear(container);
   const vendorById = new Map(vendors.map((v) => [v.id, v]));
   const reportByClient = new Map(reports.map((r) => [r.client_id, r]));
@@ -199,6 +204,7 @@ function paintDetail(container, vendors, clients, reports) {
       <th>Cliente</th><th>Mes</th><th>Zona</th><th>Vendedor</th>
       <th>Método de pago</th><th>Monto</th>
       <th># Mens. reportadas</th><th>Monto reportado</th><th>Estado</th>
+      <th></th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
   for (const c of clients) {
@@ -206,7 +212,8 @@ function paintDetail(container, vendors, clients, reports) {
     const r = reportByClient.get(c.id);
     const reported = r && (r.months_paid != null || r.total_amount != null);
     const tr = document.createElement("tr");
-    tr.innerHTML = `
+
+    const fixedHtml = `
       <td>${escapeHtml(c.name)}</td>
       <td>${escapeHtml(c.payment_month || "—")}</td>
       <td>${escapeHtml(c.zone || "—")}</td>
@@ -216,10 +223,60 @@ function paintDetail(container, vendors, clients, reports) {
       <td>${r?.months_paid ?? "—"}</td>
       <td>${r?.total_amount != null ? fmtMoney(r.total_amount) : "—"}</td>
       <td><span class="badge ${reported ? "ok" : "pending"}">${reported ? "Reportado" : "Pendiente"}</span></td>`;
+    tr.innerHTML = fixedHtml;
+
+    const tdActions = document.createElement("td");
+    const delBtn = document.createElement("button");
+    delBtn.className = "icon-danger";
+    delBtn.textContent = "Eliminar";
+    delBtn.onclick = () => deleteClientFlow(c, refresh);
+    tdActions.appendChild(delBtn);
+    tr.appendChild(tdActions);
+
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
   container.appendChild(table);
+}
+
+async function deleteClientFlow(client, refresh) {
+  const ok = await confirmDialog({
+    title: "Eliminar cliente",
+    message: `¿Seguro que quieres eliminar a "${client.name}"? También se borrará su captura de pagos. Esta acción es permanente.`,
+    confirmLabel: "Eliminar",
+    danger: true,
+  });
+  if (!ok) return;
+
+  const { error } = await sb.from("clients").delete().eq("id", client.id);
+  if (error) { toast(error.message, "error"); return; }
+  toast("Cliente eliminado.", "success");
+  refresh();
+}
+
+async function bulkDeleteFlow(refresh) {
+  const data = await openModal({
+    title: "Vaciar TODA la lista",
+    submitLabel: "Borrar todo",
+    fields: [
+      {
+        name: "confirm",
+        label: "Esto borrará TODOS los clientes y sus reportes. Escribe BORRAR para confirmar:",
+        type: "text",
+        required: true,
+      },
+    ],
+  });
+  if (!data) return;
+  if (data.confirm !== "BORRAR") {
+    toast("Cancelado: tienes que escribir BORRAR exactamente.", "info");
+    return;
+  }
+
+  const { error } = await sb.from("clients").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  if (error) { toast(error.message, "error"); return; }
+  toast("Lista vaciada.", "success");
+  refresh();
 }
 
 function triggerImport(refresh) {
