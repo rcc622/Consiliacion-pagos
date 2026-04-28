@@ -69,7 +69,7 @@ function buildToolbar(refresh) {
 async function loadAll() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount"),
     sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -196,8 +196,9 @@ function paintDetail(container, vendors, clients, reports) {
   const table = document.createElement("table");
   table.innerHTML = `
     <thead><tr>
-      <th>Cliente</th><th>Zona</th><th>Vendedor</th>
-      <th># Mens.</th><th>Monto</th><th>Estado</th>
+      <th>Cliente</th><th>Mes</th><th>Zona</th><th>Vendedor</th>
+      <th>Método de pago</th><th>Monto</th>
+      <th># Mens. reportadas</th><th>Monto reportado</th><th>Estado</th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
   for (const c of clients) {
@@ -207,8 +208,11 @@ function paintDetail(container, vendors, clients, reports) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${escapeHtml(c.name)}</td>
+      <td>${escapeHtml(c.payment_month || "—")}</td>
       <td>${escapeHtml(c.zone || "—")}</td>
       <td>${escapeHtml(v ? (v.full_name || v.email) : "—")}</td>
+      <td>${escapeHtml(c.payment_method || "—")}</td>
+      <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
       <td>${r?.months_paid ?? "—"}</td>
       <td>${r?.total_amount != null ? fmtMoney(r.total_amount) : "—"}</td>
       <td><span class="badge ${reported ? "ok" : "pending"}">${reported ? "Reportado" : "Pendiente"}</span></td>`;
@@ -252,22 +256,42 @@ async function addClientFlow(refresh) {
   if (error) { toast(error.message, "error"); return; }
   if (!vendors?.length) { toast("No hay vendedores registrados.", "error"); return; }
 
+  const months = [
+    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
+  ];
+  const methods = ["Efectivo","Transferencia","Cheque","Depósito"];
+
   const data = await openModal({
     title: "Agregar cliente",
     submitLabel: "Crear",
     fields: [
       { name: "name", label: "Nombre del cliente", type: "text", required: true },
+      {
+        name: "payment_month", label: "Mes", type: "select",
+        options: [{ value: "", label: "—" }, ...months.map((m) => ({ value: m, label: m }))],
+      },
       { name: "zone", label: "Zona", type: "text" },
       {
         name: "vendor_id", label: "Vendedor", type: "select",
         options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
       },
+      {
+        name: "payment_method", label: "Método de pago", type: "select",
+        options: [{ value: "", label: "—" }, ...methods.map((m) => ({ value: m, label: m }))],
+      },
+      { name: "amount", label: "Monto ($)", type: "number" },
     ],
   });
   if (!data) return;
 
   const { error: insErr } = await sb.from("clients").insert({
-    name: data.name, zone: data.zone || null, vendor_id: data.vendor_id,
+    name: data.name,
+    zone: data.zone || null,
+    vendor_id: data.vendor_id,
+    payment_month:  data.payment_month  || null,
+    payment_method: data.payment_method || null,
+    amount: data.amount === "" ? null : Number(data.amount),
   });
   if (insErr) { toast(insErr.message, "error"); return; }
   toast("Cliente creado.", "success");

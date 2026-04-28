@@ -34,7 +34,7 @@ function headerNode(profile) {
 
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
-    sb.from("clients").select("id, name, zone").order("name"),
+    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount").order("name"),
     sb.from("payments_report").select("client_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -77,7 +77,10 @@ function paintTable(container, clients, reports, profile) {
   thead.innerHTML = `
     <tr>
       <th>Cliente</th>
+      <th>Mes</th>
       <th>Zona</th>
+      <th>Método de pago</th>
+      <th>Monto</th>
       <th># Mensualidades</th>
       <th>Monto total</th>
       <th>Estado</th>
@@ -96,8 +99,12 @@ function paintTable(container, clients, reports, profile) {
 function rowFor(client, report, profile) {
   const tr = document.createElement("tr");
 
-  const tdName = document.createElement("td"); tdName.textContent = client.name;
-  const tdZone = document.createElement("td"); tdZone.textContent = client.zone || "—";
+  const tdName   = document.createElement("td"); tdName.textContent   = client.name;
+  const tdMonth  = document.createElement("td"); tdMonth.textContent  = client.payment_month  || "—";
+  const tdZone   = document.createElement("td"); tdZone.textContent   = client.zone           || "—";
+  const tdMethod = document.createElement("td"); tdMethod.textContent = client.payment_method || "—";
+  const tdContractAmount = document.createElement("td");
+  tdContractAmount.textContent = client.amount != null ? fmtMoney(client.amount) : "—";
 
   const monthsInput = document.createElement("input");
   monthsInput.type = "number"; monthsInput.min = "0"; monthsInput.step = "1";
@@ -139,7 +146,7 @@ function rowFor(client, report, profile) {
     });
   }
 
-  tr.append(tdName, tdZone, tdMonths, tdAmount, tdStatus);
+  tr.append(tdName, tdMonth, tdZone, tdMethod, tdContractAmount, tdMonths, tdAmount, tdStatus);
   return tr;
 }
 

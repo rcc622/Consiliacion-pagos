@@ -24,6 +24,9 @@ function normalizeRow(row) {
     cliente: out.cliente || out.nombre || out.client || "",
     zona:    out.zona    || out.zone   || "",
     vendedor_email: (out.vendedor_email || out.vendedor || out.email || "").toLowerCase(),
+    mes:    out.mes    || out.month  || "",
+    metodo: out.metodo || out.metodo_de_pago || out.method || "",
+    monto:  out.monto  || out.amount || "",
   };
 }
 
@@ -55,7 +58,15 @@ export async function importRows(rows) {
       errors.push({ row: r, reason: `Vendedor no encontrado: ${r.vendedor_email}` });
       continue;
     }
-    toInsert.push({ name: r.cliente, zone: r.zona || null, vendor_id: vid });
+    const amount = r.monto === "" ? null : Number(String(r.monto).replace(/[^0-9.\-]/g, ""));
+    toInsert.push({
+      name: r.cliente,
+      zone: r.zona || null,
+      vendor_id: vid,
+      payment_month:  r.mes    || null,
+      payment_method: r.metodo || null,
+      amount: Number.isFinite(amount) ? amount : null,
+    });
   }
 
   let inserted = 0;
