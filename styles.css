@@ -225,6 +225,34 @@ td input[type="number"] {
 }
 .badge.ok      { background: #dcfce7; color: var(--success); }
 .badge.pending { background: #fef3c7; color: var(--warning); }
+.badge.partial { background: #dbeafe; color: var(--primary); }
+
+a.row-link {
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+a.row-link:hover { text-decoration: underline; }
+
+.modal.detail-modal {
+  width: 720px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+
+.detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.detail-meta > div { display: flex; flex-direction: column; gap: 2px; }
+.detail-meta strong { color: var(--text); }
+
+.detail-schedule { margin-top: 4px; }
 
 /* Modal */
 .modal-backdrop {

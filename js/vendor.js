@@ -99,7 +99,14 @@ function paintTable(container, clients, reports, profile) {
 function rowFor(client, report, profile) {
   const tr = document.createElement("tr");
 
-  const tdName   = document.createElement("td"); tdName.textContent   = client.name;
+  const tdName   = document.createElement("td");
+  const nameLink = document.createElement("a");
+  nameLink.href = "#";
+  nameLink.textContent = client.name;
+  nameLink.className = "row-link";
+  nameLink.onclick = (ev) => { ev.preventDefault(); openClientDetail(client, report); };
+  tdName.appendChild(nameLink);
+
   const tdMonth  = document.createElement("td"); tdMonth.textContent  = client.payment_month  || "—";
   const tdZone   = document.createElement("td"); tdZone.textContent   = client.zone           || "—";
   const tdMethod = document.createElement("td"); tdMethod.textContent = client.payment_method || "—";
@@ -154,4 +161,133 @@ function paintStatus(el, report) {
   const reported = report && (report.months_paid != null || report.total_amount != null);
   el.className = "badge " + (reported ? "ok" : "pending");
   el.textContent = reported ? "Reportado" : "Pendiente";
+}
+
+// Construye el calendario de pagos esperado segun el metodo del cliente.
+// Devuelve { schedule, total, paid, due }.
+//   schedule: [{label, amount, paidAmount, status}]
+//   status: "pagado" | "parcial" | "pendiente"
+function buildSchedule(client, report) {
+  const total  = Number(client.amount || 0);
+  const paid   = Math.max(0, Number(report?.total_amount || 0));
+  const method = client.payment_method || "";
+
+  const schedule = [];
+
+  const pushItem = (label, amount, alreadyPaid) => {
+    const eff = Math.min(Math.max(0, alreadyPaid), amount);
+    let status = "pendiente";
+    if (eff >= amount && amount > 0) status = "pagado";
+    else if (eff > 0) status = "parcial";
+    schedule.push({ label, amount, paidAmount: eff, status });
+  };
+
+  if (method.startsWith("Contado Parcial-")) {
+    const enganche    = +(total * 0.5).toFixed(2);
+    const mensualidad = +(total - enganche).toFixed(2);
+
+    let remaining = paid;
+    const engPaid = Math.min(remaining, enganche);
+    remaining -= engPaid;
+    const mensPaid = Math.min(remaining, mensualidad);
+
+    pushItem("Enganche (50%)", enganche, engPaid);
+    pushItem("Mensualidad final", mensualidad, mensPaid);
+  } else if (/^\d+ Meses Sin Intereses$/.test(method) || /\b\d+ MSI$/.test(method)) {
+    const m = method.match(/^(\d+) Meses/) || method.match(/(\d+) MSI/);
+    const n = m ? parseInt(m[1], 10) : 12;
+    const mensualidad = +(total / n).toFixed(2);
+
+    let remaining = paid;
+    for (let i = 1; i <= n; i++) {
+      const pay = Math.min(remaining, mensualidad);
+      remaining -= pay;
+      pushItem(`Mensualidad ${i} de ${n}`, mensualidad, pay);
+    }
+  } else if (method === "Financiamiento" || method.startsWith("Anticipo Mejoravit")) {
+    pushItem("Plan personalizado", total, paid);
+  } else {
+    pushItem(method || "Pago único", total, paid);
+  }
+
+  return { schedule, total, paid, due: Math.max(0, total - paid) };
+}
+
+function openClientDetail(client, report) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+
+  const modal = document.createElement("div");
+  modal.className = "modal detail-modal";
+
+  const h = document.createElement("h2");
+  h.textContent = client.name;
+  modal.appendChild(h);
+
+  const meta = document.createElement("div");
+  meta.className = "detail-meta";
+  meta.innerHTML = `
+    <div><span class="muted">Zona</span><strong>${escapeHtml(client.zone || "—")}</strong></div>
+    <div><span class="muted">Mes</span><strong>${escapeHtml(client.payment_month || "—")}</strong></div>
+    <div><span class="muted">Método</span><strong>${escapeHtml(client.payment_method || "—")}</strong></div>
+  `;
+  modal.appendChild(meta);
+
+  const { schedule, total, paid, due } = buildSchedule(client, report);
+
+  const summary = document.createElement("div");
+  summary.className = "summary";
+  summary.append(
+    stat("Total contratado", fmtMoney(total)),
+    stat("Pagado a la fecha", fmtMoney(paid)),
+    stat("Adeudo", fmtMoney(due)),
+  );
+  modal.appendChild(summary);
+
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap detail-schedule";
+  const table = document.createElement("table");
+  table.innerHTML = `
+    <thead><tr>
+      <th>Concepto</th><th>Monto</th><th>Pagado</th><th>Pendiente</th><th>Estado</th>
+    </tr></thead>`;
+  const tbody = document.createElement("tbody");
+  for (const item of schedule) {
+    const pending = Math.max(0, item.amount - item.paidAmount);
+    const tr = document.createElement("tr");
+    const badgeClass = item.status === "pagado" ? "ok" : item.status === "parcial" ? "partial" : "pending";
+    const badgeText  = item.status === "pagado" ? "Pagado" : item.status === "parcial" ? "Parcial" : "Pendiente";
+    tr.innerHTML = `
+      <td>${escapeHtml(item.label)}</td>
+      <td>${fmtMoney(item.amount)}</td>
+      <td>${fmtMoney(item.paidAmount)}</td>
+      <td>${fmtMoney(pending)}</td>
+      <td><span class="badge ${badgeClass}">${badgeText}</span></td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  modal.appendChild(wrap);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "Cerrar";
+  close.onclick = () => backdrop.remove();
+  actions.appendChild(close);
+  modal.appendChild(actions);
+
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+
+  backdrop.addEventListener("click", (ev) => {
+    if (ev.target === backdrop) backdrop.remove();
+  });
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
