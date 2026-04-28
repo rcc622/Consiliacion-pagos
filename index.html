@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1024" />
+  <title>Conciliación de pagos</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar" hidden>
+    <div class="brand">Conciliación de pagos</div>
+    <div class="user">
+      <span id="user-label"></span>
+      <button id="btn-logout" type="button">Salir</button>
+    </div>
+  </header>
+
+  <main id="app">
+    <section id="view-loading" class="view">
+      <p class="muted">Cargando…</p>
+    </section>
+
+    <section id="view-login" class="view" hidden>
+      <form id="login-form" class="card">
+        <h1>Ingresar</h1>
+        <label>
+          Email
+          <input type="email" name="email" autocomplete="username" required />
+        </label>
+        <label>
+          Contraseña
+          <input type="password" name="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit">Entrar</button>
+        <p id="login-error" class="error" hidden></p>
+      </form>
+    </section>
+
+    <section id="view-vendor" class="view" hidden></section>
+    <section id="view-master" class="view" hidden></section>
+  </main>
+
+  <div id="toast-stack" aria-live="polite"></div>
+
+  <!-- Vendors externos via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <!-- App -->
+  <script type="module">
+    import { initAuth } from './js/auth.js';
+    initAuth();
+  </script>
+</body>
+</html>

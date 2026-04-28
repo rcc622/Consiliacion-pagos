@@ -1,0 +1,10 @@
+.DS_Store
+.idea/
+.vscode/
+node_modules/
+*.log
+
+# Configuración local con credenciales reales (si decides extraerlas)
+js/supabase.local.js
+.env
+.env.local
