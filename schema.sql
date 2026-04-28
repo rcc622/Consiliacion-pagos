@@ -80,6 +80,19 @@ alter table public.profiles        enable row level security;
 alter table public.clients         enable row level security;
 alter table public.payments_report enable row level security;
 
+-- Helper: rompe la recursion de RLS al consultar el rol del usuario activo.
+-- SECURITY DEFINER hace que la subconsulta a profiles ignore las policies
+-- (que de otro modo se referenciarian a si mismas y Postgres bloquea).
+create or replace function public.current_user_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role from public.profiles where id = auth.uid();
+$$;
+
 -- profiles: cada usuario lee su propio renglon; el master lee todos.
 drop policy if exists profiles_self_read   on public.profiles;
 drop policy if exists profiles_master_read on public.profiles;
@@ -89,9 +102,7 @@ create policy profiles_self_read on public.profiles
   for select using (id = auth.uid());
 
 create policy profiles_master_read on public.profiles
-  for select using (
-    (select role from public.profiles where id = auth.uid()) = 'master'
-  );
+  for select using (public.current_user_role() = 'master');
 
 create policy profiles_self_update on public.profiles
   for update using (id = auth.uid());
@@ -103,15 +114,12 @@ drop policy if exists clients_master_all    on public.clients;
 create policy clients_vendor_select on public.clients
   for select using (
     vendor_id = auth.uid()
-    or (select role from public.profiles where id = auth.uid()) = 'master'
+    or public.current_user_role() = 'master'
   );
 
 create policy clients_master_all on public.clients
-  for all using (
-    (select role from public.profiles where id = auth.uid()) = 'master'
-  ) with check (
-    (select role from public.profiles where id = auth.uid()) = 'master'
-  );
+  for all using (public.current_user_role() = 'master')
+  with check (public.current_user_role() = 'master');
 
 -- payments_report: vendor lee/escribe lo suyo; master lee todo.
 drop policy if exists pr_vendor_rw     on public.payments_report;
@@ -122,6 +130,4 @@ create policy pr_vendor_rw on public.payments_report
   with check (vendor_id = auth.uid());
 
 create policy pr_master_select on public.payments_report
-  for select using (
-    (select role from public.profiles where id = auth.uid()) = 'master'
-  );
+  for select using (public.current_user_role() = 'master');
