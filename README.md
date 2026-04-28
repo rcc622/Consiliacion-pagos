@@ -80,10 +80,12 @@ Cualquier servidor estático sirve (Vercel, GitHub Pages, Netlify, etc.).
 
 Columnas (insensibles a mayúsculas/acentos/espacios). Las 3 primeras son obligatorias, el resto opcionales:
 
-| cliente       | zona  | vendedor_email     | mes   | metodo        | monto |
-|---------------|-------|--------------------|-------|---------------|-------|
-| Juan Pérez    | Norte | juan@empresa.com   | Marzo | Transferencia | 5000  |
-| Comercial XYZ | Sur   | maria@empresa.com  | Abril | Efectivo      | 1200  |
+| cliente       | zona  | vendedor_email     | mes   | metodo     | monto |
+|---------------|-------|--------------------|-------|------------|-------|
+| Juan Pérez    | Norte | juan@empresa.com   | Marzo | Contado    | 5000  |
+| Comercial XYZ | Sur   | maria@empresa.com  | Abril | Financiado | 1200  |
+
+> Los valores válidos para `metodo` son **Contado** o **Financiado**. La importación acepta cualquier texto, pero los selects de la app solo permiten esos dos.
 
 Filas con `vendedor_email` desconocido se reportan como error y no rompen el resto del import.
 

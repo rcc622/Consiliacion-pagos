@@ -4,7 +4,16 @@ import { sb } from "./supabase.js";
 import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
 import { parseFile, importRows } from "./import.js";
 
+const MONTHS = [
+  "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
+];
+const METHODS = ["Contado","Financiado"];
+
+let selected = new Set();
+
 export async function renderMaster() {
+  selected = new Set();
   const root = document.getElementById("view-master");
   clear(root);
 
@@ -198,21 +207,67 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   const vendorById = new Map(vendors.map((v) => [v.id, v]));
   const reportByClient = new Map(reports.map((r) => [r.client_id, r]));
 
-  const table = document.createElement("table");
-  table.innerHTML = `
+  // Barra de seleccion (solo se muestra cuando hay >=1 marcado)
+  const selBar = document.createElement("div");
+  selBar.className = "selection-bar";
+  selBar.hidden = true;
+  container.appendChild(selBar);
+
+  const tableEl = document.createElement("table");
+  tableEl.innerHTML = `
     <thead><tr>
+      <th class="check-col"><input type="checkbox" data-role="select-all" /></th>
       <th>Cliente</th><th>Mes</th><th>Zona</th><th>Vendedor</th>
       <th>Método de pago</th><th>Monto</th>
       <th># Mens. reportadas</th><th>Monto reportado</th><th>Estado</th>
       <th></th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
+  const rowChecks = [];
+
+  function repaintSelBar() {
+    clear(selBar);
+    if (selected.size === 0) { selBar.hidden = true; return; }
+    selBar.hidden = false;
+
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = `${selected.size} seleccionado${selected.size === 1 ? "" : "s"}`;
+
+    const editBtn = document.createElement("button");
+    editBtn.textContent = "Editar selección";
+    editBtn.onclick = () => bulkEditSelectedFlow([...selected], vendors, refresh);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "danger";
+    delBtn.textContent = "Eliminar selección";
+    delBtn.onclick = () => bulkDeleteSelectedFlow([...selected], refresh);
+
+    selBar.append(label, editBtn, delBtn);
+  }
+
   for (const c of clients) {
     const v = vendorById.get(c.vendor_id);
     const r = reportByClient.get(c.id);
     const reported = r && (r.months_paid != null || r.total_amount != null);
     const tr = document.createElement("tr");
 
+    // Celda checkbox
+    const tdCheck = document.createElement("td");
+    tdCheck.className = "check-col";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selected.has(c.id);
+    cb.onchange = () => {
+      if (cb.checked) selected.add(c.id);
+      else selected.delete(c.id);
+      repaintSelBar();
+    };
+    rowChecks.push(cb);
+    tdCheck.appendChild(cb);
+    tr.appendChild(tdCheck);
+
+    // Resto de columnas
     const fixedHtml = `
       <td>${escapeHtml(c.name)}</td>
       <td>${escapeHtml(c.payment_month || "—")}</td>
@@ -223,20 +278,210 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       <td>${r?.months_paid ?? "—"}</td>
       <td>${r?.total_amount != null ? fmtMoney(r.total_amount) : "—"}</td>
       <td><span class="badge ${reported ? "ok" : "pending"}">${reported ? "Reportado" : "Pendiente"}</span></td>`;
-    tr.innerHTML = fixedHtml;
+    const tmpl = document.createElement("template");
+    tmpl.innerHTML = fixedHtml.trim();
+    while (tmpl.content.firstChild) tr.appendChild(tmpl.content.firstChild);
 
+    // Celda acciones (lapiz + eliminar)
     const tdActions = document.createElement("td");
+    tdActions.style.whiteSpace = "nowrap";
+
+    const editBtn = document.createElement("button");
+    editBtn.className = "ghost icon-btn";
+    editBtn.title = "Editar cliente";
+    editBtn.textContent = "✏️";
+    editBtn.onclick = () => editClientFlow(c, vendors, refresh);
+
     const delBtn = document.createElement("button");
     delBtn.className = "icon-danger";
     delBtn.textContent = "Eliminar";
     delBtn.onclick = () => deleteClientFlow(c, refresh);
-    tdActions.appendChild(delBtn);
+
+    tdActions.append(editBtn, delBtn);
     tr.appendChild(tdActions);
 
     tbody.appendChild(tr);
   }
-  table.appendChild(tbody);
-  container.appendChild(table);
+  tableEl.appendChild(tbody);
+  container.appendChild(tableEl);
+
+  // Wire del "seleccionar todo" del header
+  const selectAll = tableEl.querySelector('input[data-role="select-all"]');
+  if (selectAll) {
+    selectAll.onchange = () => {
+      for (const cb of rowChecks) cb.checked = selectAll.checked;
+      selected = new Set(selectAll.checked ? clients.map((c) => c.id) : []);
+      repaintSelBar();
+    };
+  }
+
+  repaintSelBar();
+}
+
+async function editClientFlow(client, vendors, refresh) {
+  const data = await openModal({
+    title: "Editar cliente",
+    submitLabel: "Guardar",
+    fields: [
+      { name: "name", label: "Nombre del cliente", type: "text", required: true, value: client.name || "" },
+      {
+        name: "payment_month", label: "Mes", type: "select", value: client.payment_month || "",
+        options: [{ value: "", label: "—" }, ...MONTHS.map((m) => ({ value: m, label: m }))],
+      },
+      { name: "zone", label: "Zona", type: "text", value: client.zone || "" },
+      {
+        name: "vendor_id", label: "Vendedor", type: "select", value: client.vendor_id || "",
+        options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
+      },
+      {
+        name: "payment_method", label: "Método de pago", type: "select", value: client.payment_method || "",
+        options: [{ value: "", label: "—" }, ...METHODS.map((m) => ({ value: m, label: m }))],
+      },
+      { name: "amount", label: "Monto ($)", type: "number", value: client.amount ?? "" },
+    ],
+  });
+  if (!data) return;
+
+  const update = {
+    name: data.name,
+    zone: data.zone || null,
+    vendor_id: data.vendor_id,
+    payment_month:  data.payment_month  || null,
+    payment_method: data.payment_method || null,
+    amount: data.amount === "" ? null : Number(data.amount),
+  };
+
+  const { error } = await sb.from("clients").update(update).eq("id", client.id);
+  if (error) { toast(error.message, "error"); return; }
+  toast("Cliente actualizado.", "success");
+  refresh();
+}
+
+function bulkEditSelectedFlow(ids, vendors, refresh) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+
+    const modal = document.createElement("div");
+    modal.className = "modal";
+
+    const h = document.createElement("h2");
+    h.textContent = `Editar ${ids.length} cliente${ids.length === 1 ? "" : "s"} en bloque`;
+    modal.appendChild(h);
+
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.style.margin = "0";
+    note.textContent = "Marca solo los campos que quieres cambiar. Los demás quedan igual.";
+    modal.appendChild(note);
+
+    const form = document.createElement("form");
+
+    const zoneRow = makeOptionalField({ label: "Zona", type: "text" });
+    const vendorRow = makeOptionalField({
+      label: "Vendedor asignado", type: "select",
+      options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
+    });
+    const methodRow = makeOptionalField({
+      label: "Método de pago", type: "select",
+      options: METHODS.map((m) => ({ value: m, label: m })),
+    });
+
+    form.append(zoneRow.wrapper, vendorRow.wrapper, methodRow.wrapper);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "ghost";
+    cancel.textContent = "Cancelar";
+    cancel.onclick = () => { backdrop.remove(); resolve(); };
+
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.textContent = "Aplicar cambios";
+
+    actions.append(cancel, submit);
+    form.appendChild(actions);
+    modal.appendChild(form);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const update = {};
+      if (zoneRow.checkbox.checked)   update.zone           = zoneRow.input.value || null;
+      if (vendorRow.checkbox.checked) update.vendor_id      = vendorRow.input.value;
+      if (methodRow.checkbox.checked) update.payment_method = methodRow.input.value || null;
+
+      if (Object.keys(update).length === 0) {
+        toast("No marcaste ningún campo para cambiar.", "info");
+        return;
+      }
+
+      backdrop.remove();
+      const { error } = await sb.from("clients").update(update).in("id", ids);
+      if (error) { toast(error.message, "error"); resolve(); return; }
+      toast(`${ids.length} cliente${ids.length === 1 ? "" : "s"} actualizado${ids.length === 1 ? "" : "s"}.`, "success");
+      refresh();
+      resolve();
+    };
+
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve(); }
+    });
+  });
+}
+
+function makeOptionalField({ label, type, options }) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "optional-field";
+
+  const head = document.createElement("label");
+  head.className = "optional-head";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+
+  const labelSpan = document.createElement("span");
+  labelSpan.textContent = `Cambiar ${label}`;
+
+  head.append(checkbox, labelSpan);
+  wrapper.appendChild(head);
+
+  const input = document.createElement(type === "select" ? "select" : "input");
+  if (type === "select") {
+    for (const opt of options || []) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      input.appendChild(o);
+    }
+  } else {
+    input.type = type;
+  }
+  input.disabled = true;
+
+  checkbox.onchange = () => { input.disabled = !checkbox.checked; };
+
+  wrapper.appendChild(input);
+  return { wrapper, checkbox, input };
+}
+
+async function bulkDeleteSelectedFlow(ids, refresh) {
+  const ok = await confirmDialog({
+    title: `Eliminar ${ids.length} cliente${ids.length === 1 ? "" : "s"}`,
+    message: `¿Eliminar los ${ids.length} cliente${ids.length === 1 ? "" : "s"} seleccionado${ids.length === 1 ? "" : "s"}? También se borran sus capturas. Es permanente.`,
+    confirmLabel: "Eliminar",
+    danger: true,
+  });
+  if (!ok) return;
+
+  const { error } = await sb.from("clients").delete().in("id", ids);
+  if (error) { toast(error.message, "error"); return; }
+  toast(`${ids.length} eliminado${ids.length === 1 ? "" : "s"}.`, "success");
+  refresh();
 }
 
 async function deleteClientFlow(client, refresh) {
@@ -313,12 +558,6 @@ async function addClientFlow(refresh) {
   if (error) { toast(error.message, "error"); return; }
   if (!vendors?.length) { toast("No hay vendedores registrados.", "error"); return; }
 
-  const months = [
-    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
-    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
-  ];
-  const methods = ["Efectivo","Transferencia","Cheque","Depósito"];
-
   const data = await openModal({
     title: "Agregar cliente",
     submitLabel: "Crear",
@@ -326,7 +565,7 @@ async function addClientFlow(refresh) {
       { name: "name", label: "Nombre del cliente", type: "text", required: true },
       {
         name: "payment_month", label: "Mes", type: "select",
-        options: [{ value: "", label: "—" }, ...months.map((m) => ({ value: m, label: m }))],
+        options: [{ value: "", label: "—" }, ...MONTHS.map((m) => ({ value: m, label: m }))],
       },
       { name: "zone", label: "Zona", type: "text" },
       {
@@ -335,7 +574,7 @@ async function addClientFlow(refresh) {
       },
       {
         name: "payment_method", label: "Método de pago", type: "select",
-        options: [{ value: "", label: "—" }, ...methods.map((m) => ({ value: m, label: m }))],
+        options: [{ value: "", label: "—" }, ...METHODS.map((m) => ({ value: m, label: m }))],
       },
       { name: "amount", label: "Monto ($)", type: "number" },
     ],
