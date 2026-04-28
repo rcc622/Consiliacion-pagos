@@ -38,12 +38,20 @@ create trigger on_auth_user_created
 
 -- clients ------------------------------------------------------------------
 create table if not exists public.clients (
-  id          uuid primary key default gen_random_uuid(),
-  name        text not null,
-  zone        text,
-  vendor_id   uuid references public.profiles(id) on delete set null,
-  created_at  timestamptz not null default now()
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null,
+  zone           text,
+  vendor_id      uuid references public.profiles(id) on delete set null,
+  payment_month  text,
+  payment_method text,
+  amount         numeric(12,2),
+  created_at     timestamptz not null default now()
 );
+
+-- En instalaciones existentes, agregar columnas nuevas si faltan.
+alter table public.clients add column if not exists payment_month  text;
+alter table public.clients add column if not exists payment_method text;
+alter table public.clients add column if not exists amount         numeric(12,2);
 
 create index if not exists clients_vendor_idx on public.clients(vendor_id);
 create index if not exists clients_zone_idx   on public.clients(zone);

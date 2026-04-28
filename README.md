@@ -78,12 +78,12 @@ Cualquier servidor estático sirve (Vercel, GitHub Pages, Netlify, etc.).
 
 ## Formato del archivo de importación
 
-Columnas mínimas (insensibles a mayúsculas/acentos/espacios):
+Columnas (insensibles a mayúsculas/acentos/espacios). Las 3 primeras son obligatorias, el resto opcionales:
 
-| cliente         | zona  | vendedor_email     |
-|-----------------|-------|--------------------|
-| Juan Pérez      | Norte | juan@empresa.com   |
-| Comercial XYZ   | Sur   | maria@empresa.com  |
+| cliente       | zona  | vendedor_email     | mes   | metodo        | monto |
+|---------------|-------|--------------------|-------|---------------|-------|
+| Juan Pérez    | Norte | juan@empresa.com   | Marzo | Transferencia | 5000  |
+| Comercial XYZ | Sur   | maria@empresa.com  | Abril | Efectivo      | 1200  |
 
 Filas con `vendedor_email` desconocido se reportan como error y no rompen el resto del import.
 
