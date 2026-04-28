@@ -83,6 +83,30 @@ create trigger trg_pr_updated_at
   before update on public.payments_report
   for each row execute function public.touch_updated_at();
 
+-- Cuando el master reasigna un cliente a otro vendedor, mover tambien el
+-- reporte para que la captura siga al cliente y no rompa la RLS del nuevo
+-- vendedor. SECURITY DEFINER ignora RLS dentro del trigger.
+create or replace function public.sync_pr_vendor()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.vendor_id is distinct from new.vendor_id then
+    update public.payments_report
+       set vendor_id = new.vendor_id
+     where client_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_sync_pr_vendor on public.clients;
+create trigger trg_sync_pr_vendor
+  after update on public.clients
+  for each row execute function public.sync_pr_vendor();
+
 -- RLS ----------------------------------------------------------------------
 alter table public.profiles        enable row level security;
 alter table public.clients         enable row level security;
