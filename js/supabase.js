@@ -2,8 +2,8 @@
 // Pegar URL y anon key del proyecto (Settings → API en Supabase).
 // Es seguro publicarlas: la seguridad la da RLS, no estas claves.
 
-export const SUPABASE_URL  = "<TU_SUPABASE_URL>";
-export const SUPABASE_ANON = "<TU_SUPABASE_ANON_KEY>";
+export const SUPABASE_URL  = "https://mtgssesahqhnksuafznz.supabase.co";
+export const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10Z3NzZXNhaHFobmtzdWFmem56Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNDA4NzgsImV4cCI6MjA5MjkxNjg3OH0.0CTHa1y99gr2hr3jU9trmOVCI0-n2q0brSD3c75PtYk";
 
 if (!window.supabase) {
   throw new Error(
