@@ -24,7 +24,14 @@ export async function initAuth() {
   const { data: { session } } = await sb.auth.getSession();
   await routeFor(session);
 
-  sb.auth.onAuthStateChange((_event, session) => routeFor(session));
+  // Solo re-ruteamos en cambios reales de sesion. TOKEN_REFRESHED ocurre
+  // cuando la pestana vuelve al foco y rompe la vista (la deja en
+  // "Cargando..." indefinidamente).
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+      routeFor(session);
+    }
+  });
 }
 
 function bindLoginForm() {
