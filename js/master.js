@@ -3,6 +3,7 @@
 import { sb } from "./supabase.js";
 import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
 import { parseFile, importRows } from "./import.js";
+import { exportConciliation } from "./export.js";
 
 const MONTHS = [
   "Enero","Febrero","Marzo","Abril","Mayo","Junio",
@@ -97,6 +98,16 @@ function buildToolbar(refresh) {
   addBtn.textContent = "Agregar cliente";
   addBtn.onclick = () => addClientFlow(refresh);
 
+  const exportXlsxBtn = document.createElement("button");
+  exportXlsxBtn.className = "ghost";
+  exportXlsxBtn.textContent = "Exportar Excel";
+  exportXlsxBtn.onclick = () => exportConciliation("xlsx");
+
+  const exportCsvBtn = document.createElement("button");
+  exportCsvBtn.className = "ghost";
+  exportCsvBtn.textContent = "Exportar CSV";
+  exportCsvBtn.onclick = () => exportConciliation("csv");
+
   const spacer = document.createElement("div");
   spacer.className = "spacer";
 
@@ -105,7 +116,7 @@ function buildToolbar(refresh) {
   wipeBtn.textContent = "Vaciar lista";
   wipeBtn.onclick = () => bulkDeleteFlow(refresh);
 
-  bar.append(importBtn, addBtn, spacer, wipeBtn);
+  bar.append(importBtn, addBtn, exportXlsxBtn, exportCsvBtn, spacer, wipeBtn);
   return bar;
 }
 
