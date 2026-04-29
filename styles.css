@@ -253,6 +253,10 @@ a.row-link:hover { text-decoration: underline; }
 .detail-meta strong { color: var(--text); }
 
 .detail-schedule { margin-top: 4px; }
+.detail-schedule td input,
+.detail-schedule td select { width: 100%; min-width: 110px; }
+.detail-schedule td input[type="date"] { min-width: 140px; }
+.detail-schedule td input[type="number"] { text-align: right; }
 
 /* Modal */
 .modal-backdrop {

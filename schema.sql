@@ -62,9 +62,13 @@ create table if not exists public.payments_report (
   vendor_id     uuid not null references public.profiles(id) on delete cascade,
   months_paid   int           check (months_paid >= 0),
   total_amount  numeric(12,2) check (total_amount >= 0),
+  installments  jsonb,
   reported_at   timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+
+-- Para instalaciones existentes:
+alter table public.payments_report add column if not exists installments jsonb;
 
 create index if not exists pr_vendor_idx on public.payments_report(vendor_id);
 
