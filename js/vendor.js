@@ -221,6 +221,11 @@ function openClientDetail(client, report, profile, refresh) {
   const tbody = document.createElement("tbody");
   table.appendChild(tbody);
   wrap.appendChild(table);
+
+  // Barra de paginacion (solo se muestra si hay >5 mensualidades)
+  const pagBar = document.createElement("div");
+  pagBar.className = "pagination-bar";
+  modal.appendChild(pagBar);
   modal.appendChild(wrap);
 
   // Estado en memoria de las mensualidades
@@ -265,7 +270,76 @@ function openClientDetail(client, report, profile, refresh) {
     }, { onConflict: "client_id" });
   }
 
-  for (const r of rows) tbody.appendChild(buildScheduleRow(r, refreshSummary, persist));
+  // === Paginacion ============================================================
+  const PAGE_SIZES = [5, 10, 25, 50];
+  let pageSize = 10;
+  let currentPage = 1;
+
+  function totalPages() {
+    if (pageSize === Infinity) return 1;
+    return Math.max(1, Math.ceil(rows.length / pageSize));
+  }
+
+  function paintPagination() {
+    clear(pagBar);
+    if (rows.length <= 5) { pagBar.hidden = true; return; }
+    pagBar.hidden = false;
+
+    const sizeLabel = document.createElement("label");
+    sizeLabel.className = "page-size";
+    sizeLabel.textContent = "Mostrar ";
+    const sizeSelect = document.createElement("select");
+    for (const s of PAGE_SIZES) sizeSelect.appendChild(opt(String(s), String(s)));
+    sizeSelect.appendChild(opt("all", "Todos"));
+    sizeSelect.value = pageSize === Infinity ? "all" : String(pageSize);
+    sizeSelect.onchange = () => {
+      pageSize = sizeSelect.value === "all" ? Infinity : Number(sizeSelect.value);
+      currentPage = 1;
+      renderPage();
+    };
+    sizeLabel.appendChild(sizeSelect);
+    pagBar.appendChild(sizeLabel);
+
+    const spacer = document.createElement("div");
+    spacer.className = "spacer";
+    pagBar.appendChild(spacer);
+
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.className = "ghost";
+    prev.textContent = "‹";
+    prev.disabled = currentPage <= 1;
+    prev.onclick = () => { currentPage--; renderPage(); };
+
+    const info = document.createElement("span");
+    info.className = "muted page-info";
+    info.textContent = `Página ${currentPage} de ${totalPages()}`;
+
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "ghost";
+    next.textContent = "›";
+    next.disabled = currentPage >= totalPages();
+    next.onclick = () => { currentPage++; renderPage(); };
+
+    pagBar.append(prev, info, next);
+  }
+
+  function renderPage() {
+    if (currentPage > totalPages()) currentPage = totalPages();
+    if (currentPage < 1) currentPage = 1;
+
+    const start = pageSize === Infinity ? 0 : (currentPage - 1) * pageSize;
+    const end   = pageSize === Infinity ? rows.length : start + pageSize;
+
+    clear(tbody);
+    for (const r of rows.slice(start, end)) {
+      tbody.appendChild(buildScheduleRow(r, refreshSummary, persist));
+    }
+    paintPagination();
+  }
+
+  renderPage();
   refreshSummary();
 
   // Footer
