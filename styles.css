@@ -252,6 +252,18 @@ a.row-link:hover { text-decoration: underline; }
 .detail-meta > div { display: flex; flex-direction: column; gap: 2px; }
 .detail-meta strong { color: var(--text); }
 
+/* Stats compactos dentro del modal de detalle: caben los 4 en una fila */
+.detail-modal .summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.detail-modal .summary .stat {
+  padding: 10px 12px;
+}
+.detail-modal .summary .stat .label { font-size: 11px; }
+.detail-modal .summary .stat .value { font-size: 16px; margin-top: 2px; }
+
 .detail-schedule {
   margin-top: 4px;
   max-height: 50vh;
