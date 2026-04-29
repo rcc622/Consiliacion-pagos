@@ -306,11 +306,13 @@ function buildScheduleRow(r, refreshSummary, persist) {
   const tdLabel = document.createElement("td");
   tdLabel.textContent = r.label;
 
+  // Monto: input texto que muestra "$15,000.00" en blur y el numero crudo
+  // en focus (para editar). Mantiene inputMode=decimal para teclado numerico.
   const tdAmount = document.createElement("td");
   const amountInput = document.createElement("input");
-  amountInput.type = "number"; amountInput.min = "0"; amountInput.step = "0.01";
-  amountInput.placeholder = String(r.expected.toFixed(2));
-  amountInput.value = r.amount ?? "";
+  amountInput.type = "text";
+  amountInput.inputMode = "decimal";
+  amountInput.placeholder = fmtMoney(r.expected);
   tdAmount.appendChild(amountInput);
 
   const tdForm = document.createElement("td");
@@ -330,6 +332,11 @@ function buildScheduleRow(r, refreshSummary, persist) {
   const badge = document.createElement("span");
   tdStatus.appendChild(badge);
 
+  function paintAmount() {
+    if (r.amount != null && r.amount !== "") amountInput.value = fmtMoney(Number(r.amount));
+    else amountInput.value = "";
+  }
+
   function paintBadge() {
     if (isPaidRow(r)) { badge.className = "badge ok"; badge.textContent = "Pagado"; }
     else if ((r.amount != null && r.amount !== "") || r.form || r.date) {
@@ -338,6 +345,7 @@ function buildScheduleRow(r, refreshSummary, persist) {
       badge.className = "badge pending"; badge.textContent = "Pendiente";
     }
   }
+  paintAmount();
   paintBadge();
 
   let pendingSave = false;
@@ -349,26 +357,36 @@ function buildScheduleRow(r, refreshSummary, persist) {
     if (error) toast(error.message, "error");
   }
 
-  function onChange() {
-    r.amount = amountInput.value === "" ? null : Number(amountInput.value);
-    r.form   = formSelect.value;
-    r.date   = dateInput.value;
+  function commit() {
+    // Parsear el monto del display (puede traer "$" y comas)
+    const raw = amountInput.value.replace(/[^\d.\-]/g, "");
+    r.amount = raw === "" ? null : Number(raw);
+    if (!Number.isFinite(r.amount)) r.amount = null;
+    r.form = formSelect.value;
+    r.date = dateInput.value;
 
     // Si llena forma+fecha pero el monto sigue vacio, asume el esperado.
-    if (r.form && r.date && (r.amount == null || r.amount === "")) {
+    if (r.form && r.date && (r.amount == null)) {
       r.amount = r.expected;
-      amountInput.value = String(r.expected);
     }
 
+    paintAmount();
     paintBadge();
     refreshSummary();
     save();
   }
 
-  amountInput.addEventListener("blur", onChange);
-  amountInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") amountInput.blur(); });
-  formSelect.addEventListener("change", onChange);
-  dateInput.addEventListener("change", onChange);
+  amountInput.addEventListener("focus", () => {
+    if (r.amount != null) amountInput.value = String(r.amount);
+    else amountInput.value = "";
+    setTimeout(() => amountInput.select(), 0);
+  });
+  amountInput.addEventListener("blur", commit);
+  amountInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); amountInput.blur(); }
+  });
+  formSelect.addEventListener("change", commit);
+  dateInput.addEventListener("change", commit);
 
   tr.append(tdLabel, tdAmount, tdForm, tdDate, tdStatus);
   return tr;
