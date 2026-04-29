@@ -252,7 +252,17 @@ a.row-link:hover { text-decoration: underline; }
 .detail-meta > div { display: flex; flex-direction: column; gap: 2px; }
 .detail-meta strong { color: var(--text); }
 
-.detail-schedule { margin-top: 4px; }
+.detail-schedule {
+  margin-top: 4px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.detail-schedule thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
 .detail-schedule td input,
 .detail-schedule td select { width: 100%; min-width: 110px; }
 .detail-schedule td input[type="date"] { min-width: 140px; }
