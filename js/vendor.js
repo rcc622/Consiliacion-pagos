@@ -1,8 +1,10 @@
-// Vista vendedor: una tabla con sus clientes y captura inline.
+// Vista vendedor: tabla resumen de sus clientes + modal con detalle por mensualidad.
 
 import { sb } from "./supabase.js";
 import { clear, toast, fmtMoney } from "./ui.js";
 import { getProfile } from "./auth.js";
+
+const PAYMENT_FORMS = ["Efectivo", "Transferencia", "Link de pago"];
 
 export async function renderVendor() {
   const root = document.getElementById("view-vendor");
@@ -23,7 +25,7 @@ export async function renderVendor() {
 
   const { clients, reports } = await loadData();
   paintSummary(summary, clients, reports);
-  paintTable(tableWrap, clients, reports, profile);
+  paintTable(tableWrap, clients, reports, profile, () => renderVendor());
 }
 
 function headerNode(profile) {
@@ -35,7 +37,7 @@ function headerNode(profile) {
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
     sb.from("clients").select("id, name, zone, payment_month, payment_method, amount").order("name"),
-    sb.from("payments_report").select("client_id, months_paid, total_amount, updated_at"),
+    sb.from("payments_report").select("client_id, months_paid, total_amount, installments, updated_at"),
   ]);
 
   if (clientsRes.error) { toast(clientsRes.error.message, "error"); throw clientsRes.error; }
@@ -45,7 +47,7 @@ async function loadData() {
 }
 
 function paintSummary(container, clients, reports) {
-  const reportedIds = new Set(reports.map((r) => r.client_id));
+  const reportedIds = new Set(reports.filter(isReportedAtAll).map((r) => r.client_id));
   const reportedCount = clients.filter((c) => reportedIds.has(c.id)).length;
   const total = clients.length;
   const totalAmount = reports.reduce((s, r) => s + Number(r.total_amount || 0), 0);
@@ -53,10 +55,14 @@ function paintSummary(container, clients, reports) {
   clear(container);
   container.append(
     stat("Asignados", total),
-    stat("Reportados", `${reportedCount} / ${total}`),
+    stat("Con captura", `${reportedCount} / ${total}`),
     stat("Pendientes", total - reportedCount),
-    stat("Monto total reportado", fmtMoney(totalAmount)),
+    stat("Monto cobrado", fmtMoney(totalAmount)),
   );
+}
+
+function isReportedAtAll(r) {
+  return r && (r.months_paid > 0 || Number(r.total_amount) > 0);
 }
 
 function stat(label, value) {
@@ -68,7 +74,7 @@ function stat(label, value) {
   return el;
 }
 
-function paintTable(container, clients, reports, profile) {
+function paintTable(container, clients, reports, profile, refresh) {
   clear(container);
   const reportByClient = new Map(reports.map((r) => [r.client_id, r]));
 
@@ -81,8 +87,8 @@ function paintTable(container, clients, reports, profile) {
       <th>Zona</th>
       <th>Método de pago</th>
       <th>Monto</th>
-      <th># Mensualidades</th>
-      <th>Monto total</th>
+      <th>Pagadas / Total</th>
+      <th>Cobrado</th>
       <th>Estado</th>
     </tr>`;
   table.appendChild(thead);
@@ -90,136 +96,97 @@ function paintTable(container, clients, reports, profile) {
   const tbody = document.createElement("tbody");
   for (const c of clients) {
     const r = reportByClient.get(c.id);
-    tbody.appendChild(rowFor(c, r, profile));
+    tbody.appendChild(rowFor(c, r, profile, refresh));
   }
   table.appendChild(tbody);
   container.appendChild(table);
 }
 
-function rowFor(client, report, profile) {
+function rowFor(client, report, profile, refresh) {
   const tr = document.createElement("tr");
 
-  const tdName   = document.createElement("td");
-  const nameLink = document.createElement("a");
-  nameLink.href = "#";
-  nameLink.textContent = client.name;
-  nameLink.className = "row-link";
-  nameLink.onclick = (ev) => { ev.preventDefault(); openClientDetail(client, report); };
-  tdName.appendChild(nameLink);
+  const tdName = document.createElement("td");
+  const link = document.createElement("a");
+  link.href = "#";
+  link.textContent = client.name;
+  link.className = "row-link";
+  link.onclick = (ev) => { ev.preventDefault(); openClientDetail(client, report, profile, refresh); };
+  tdName.appendChild(link);
 
-  const tdMonth  = document.createElement("td"); tdMonth.textContent  = client.payment_month  || "—";
-  const tdZone   = document.createElement("td"); tdZone.textContent   = client.zone           || "—";
-  const tdMethod = document.createElement("td"); tdMethod.textContent = client.payment_method || "—";
-  const tdContractAmount = document.createElement("td");
-  tdContractAmount.textContent = client.amount != null ? fmtMoney(client.amount) : "—";
+  const tdMonth   = document.createElement("td"); tdMonth.textContent   = client.payment_month  || "—";
+  const tdZone    = document.createElement("td"); tdZone.textContent    = client.zone           || "—";
+  const tdMethod  = document.createElement("td"); tdMethod.textContent  = client.payment_method || "—";
+  const tdAmount  = document.createElement("td"); tdAmount.textContent  = client.amount != null ? fmtMoney(client.amount) : "—";
 
-  const monthsInput = document.createElement("input");
-  monthsInput.type = "number"; monthsInput.min = "0"; monthsInput.step = "1";
-  monthsInput.value = report?.months_paid ?? "";
+  const expected = expectedInstallmentCount(client);
+  const paid = Number(report?.months_paid || 0);
+  const tdProgress = document.createElement("td");
+  tdProgress.textContent = expected ? `${paid} / ${expected}` : "—";
 
-  const amountInput = document.createElement("input");
-  amountInput.type = "number"; amountInput.min = "0"; amountInput.step = "0.01";
-  amountInput.value = report?.total_amount ?? "";
-
-  const tdMonths = document.createElement("td"); tdMonths.appendChild(monthsInput);
-  const tdAmount = document.createElement("td"); tdAmount.appendChild(amountInput);
+  const tdCobrado = document.createElement("td");
+  tdCobrado.textContent = report?.total_amount != null ? fmtMoney(report.total_amount) : fmtMoney(0);
 
   const tdStatus = document.createElement("td");
   const badge = document.createElement("span");
+  paintRowStatus(badge, paid, expected);
   tdStatus.appendChild(badge);
-  paintStatus(badge, report);
 
-  const save = async () => {
-    const months = monthsInput.value === "" ? null : Number(monthsInput.value);
-    const amount = amountInput.value === "" ? null : Number(amountInput.value);
-    if (months == null && amount == null) return; // nada que guardar
-
-    const { error } = await sb.from("payments_report").upsert({
-      client_id: client.id,
-      vendor_id: profile.id,
-      months_paid: months,
-      total_amount: amount,
-    }, { onConflict: "client_id" });
-
-    if (error) { toast(error.message, "error"); return; }
-    toast("Guardado", "success", 1500);
-    paintStatus(badge, { months_paid: months, total_amount: amount });
-  };
-
-  for (const inp of [monthsInput, amountInput]) {
-    inp.addEventListener("blur", save);
-    inp.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") { ev.preventDefault(); inp.blur(); }
-    });
-  }
-
-  tr.append(tdName, tdMonth, tdZone, tdMethod, tdContractAmount, tdMonths, tdAmount, tdStatus);
+  tr.append(tdName, tdMonth, tdZone, tdMethod, tdAmount, tdProgress, tdCobrado, tdStatus);
   return tr;
 }
 
-function paintStatus(el, report) {
-  const reported = report && (report.months_paid != null || report.total_amount != null);
-  el.className = "badge " + (reported ? "ok" : "pending");
-  el.textContent = reported ? "Reportado" : "Pendiente";
+function paintRowStatus(el, paid, expected) {
+  if (!expected) { el.className = "badge pending"; el.textContent = "—"; return; }
+  if (paid >= expected) { el.className = "badge ok"; el.textContent = "Completo"; return; }
+  if (paid > 0) { el.className = "badge partial"; el.textContent = "Parcial"; return; }
+  el.className = "badge pending"; el.textContent = "Pendiente";
 }
 
-// Construye el calendario de pagos esperado segun el metodo del cliente.
-// Devuelve { schedule, total, paid, due }.
-//   schedule: [{label, amount, paidAmount, status}]
-//   status: "pagado" | "parcial" | "pendiente"
-function buildSchedule(client, report) {
+// === Schedule por método ====================================================
+
+// Devuelve [{n, label, expected_amount}] segun el metodo del cliente.
+function buildSchedule(client) {
   const total  = Number(client.amount || 0);
-  const paid   = Math.max(0, Number(report?.total_amount || 0));
   const method = client.payment_method || "";
-
-  const schedule = [];
-
-  const pushItem = (label, amount, alreadyPaid) => {
-    const eff = Math.min(Math.max(0, alreadyPaid), amount);
-    let status = "pendiente";
-    if (eff >= amount && amount > 0) status = "pagado";
-    else if (eff > 0) status = "parcial";
-    schedule.push({ label, amount, paidAmount: eff, status });
-  };
 
   if (method.startsWith("Contado Parcial-")) {
     const enganche    = +(total * 0.5).toFixed(2);
     const mensualidad = +(total - enganche).toFixed(2);
-
-    let remaining = paid;
-    const engPaid = Math.min(remaining, enganche);
-    remaining -= engPaid;
-    const mensPaid = Math.min(remaining, mensualidad);
-
-    pushItem("Enganche (50%)", enganche, engPaid);
-    pushItem("Mensualidad final", mensualidad, mensPaid);
-  } else if (/^\d+ Meses Sin Intereses$/.test(method) || /\b\d+ MSI$/.test(method)) {
-    const m = method.match(/^(\d+) Meses/) || method.match(/(\d+) MSI/);
-    const n = m ? parseInt(m[1], 10) : 12;
-    const mensualidad = +(total / n).toFixed(2);
-
-    let remaining = paid;
-    for (let i = 1; i <= n; i++) {
-      const pay = Math.min(remaining, mensualidad);
-      remaining -= pay;
-      pushItem(`Mensualidad ${i} de ${n}`, mensualidad, pay);
-    }
-  } else if (method === "Financiamiento" || method.startsWith("Anticipo Mejoravit")) {
-    pushItem("Plan personalizado", total, paid);
-  } else {
-    pushItem(method || "Pago único", total, paid);
+    return [
+      { n: 0, label: "Enganche (50%)",    expected_amount: enganche },
+      { n: 1, label: "Mensualidad final", expected_amount: mensualidad },
+    ];
   }
 
-  return { schedule, total, paid, due: Math.max(0, total - paid) };
+  const msi = method.match(/^(\d+) Meses Sin Intereses$/) || method.match(/(\d+) MSI$/);
+  if (msi) {
+    const n = parseInt(msi[1], 10);
+    const mensualidad = +(total / n).toFixed(2);
+    const out = [];
+    for (let i = 1; i <= n; i++) {
+      out.push({ n: i, label: `Mensualidad ${i} de ${n}`, expected_amount: mensualidad });
+    }
+    return out;
+  }
+
+  // Anticipo Mejoravit / Financiamiento / fallback
+  return [{ n: 1, label: "Plan personalizado", expected_amount: total }];
 }
 
-function openClientDetail(client, report) {
+function expectedInstallmentCount(client) {
+  return buildSchedule(client).length;
+}
+
+// === Modal de detalle =======================================================
+
+function openClientDetail(client, report, profile, refresh) {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
 
   const modal = document.createElement("div");
   modal.className = "modal detail-modal";
 
+  // Header con info del cliente
   const h = document.createElement("h2");
   h.textContent = client.name;
   modal.appendChild(h);
@@ -230,51 +197,84 @@ function openClientDetail(client, report) {
     <div><span class="muted">Zona</span><strong>${escapeHtml(client.zone || "—")}</strong></div>
     <div><span class="muted">Mes</span><strong>${escapeHtml(client.payment_month || "—")}</strong></div>
     <div><span class="muted">Método</span><strong>${escapeHtml(client.payment_method || "—")}</strong></div>
+    <div><span class="muted">Total</span><strong>${client.amount != null ? fmtMoney(client.amount) : "—"}</strong></div>
   `;
   modal.appendChild(meta);
 
-  const { schedule, total, paid, due } = buildSchedule(client, report);
-
+  // Stats (se actualizan en cada cambio)
   const summary = document.createElement("div");
   summary.className = "summary";
-  summary.append(
-    stat("Total contratado", fmtMoney(total)),
-    stat("Pagado a la fecha", fmtMoney(paid)),
-    stat("Adeudo", fmtMoney(due)),
-  );
   modal.appendChild(summary);
 
+  // Tabla de mensualidades
   const wrap = document.createElement("div");
   wrap.className = "table-wrap detail-schedule";
   const table = document.createElement("table");
   table.innerHTML = `
     <thead><tr>
-      <th>Concepto</th><th>Monto</th><th>Pagado</th><th>Pendiente</th><th>Estado</th>
+      <th>Mensualidad</th>
+      <th>Monto</th>
+      <th>Forma de pago</th>
+      <th>Fecha de pago</th>
+      <th>Status</th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
-  for (const item of schedule) {
-    const pending = Math.max(0, item.amount - item.paidAmount);
-    const tr = document.createElement("tr");
-    const badgeClass = item.status === "pagado" ? "ok" : item.status === "parcial" ? "partial" : "pending";
-    const badgeText  = item.status === "pagado" ? "Pagado" : item.status === "parcial" ? "Parcial" : "Pendiente";
-    tr.innerHTML = `
-      <td>${escapeHtml(item.label)}</td>
-      <td>${fmtMoney(item.amount)}</td>
-      <td>${fmtMoney(item.paidAmount)}</td>
-      <td>${fmtMoney(pending)}</td>
-      <td><span class="badge ${badgeClass}">${badgeText}</span></td>`;
-    tbody.appendChild(tr);
-  }
   table.appendChild(tbody);
   wrap.appendChild(table);
   modal.appendChild(wrap);
 
+  // Estado en memoria de las mensualidades
+  const schedule = buildSchedule(client);
+  const saved = indexInstallments(report?.installments);
+  const rows = schedule.map((item) => ({
+    n: item.n,
+    label: item.label,
+    expected: item.expected_amount,
+    amount: saved.get(item.n)?.amount ?? null,
+    form:   saved.get(item.n)?.form   ?? "",
+    date:   saved.get(item.n)?.date   ?? "",
+  }));
+
+  function refreshSummary() {
+    const paidRows = rows.filter(isPaidRow);
+    const monthsPaid = paidRows.length;
+    const totalPaid = paidRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    const totalContract = Number(client.amount || 0);
+    clear(summary);
+    summary.append(
+      stat("Total contratado", fmtMoney(totalContract)),
+      stat("Pagado a la fecha", fmtMoney(totalPaid)),
+      stat("Adeudo", fmtMoney(Math.max(0, totalContract - totalPaid))),
+      stat("Mensualidades", `${monthsPaid} / ${rows.length}`),
+    );
+  }
+
+  async function persist() {
+    const installments = rows
+      .filter(isPaidRow)
+      .map((r) => ({ n: r.n, amount: Number(r.amount), form: r.form, date: r.date }));
+    const monthsPaid = installments.length;
+    const totalPaid = installments.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+    return sb.from("payments_report").upsert({
+      client_id: client.id,
+      vendor_id: profile.id,
+      months_paid: monthsPaid,
+      total_amount: totalPaid,
+      installments,
+    }, { onConflict: "client_id" });
+  }
+
+  for (const r of rows) tbody.appendChild(buildScheduleRow(r, refreshSummary, persist));
+  refreshSummary();
+
+  // Footer
   const actions = document.createElement("div");
   actions.className = "actions";
   const close = document.createElement("button");
   close.type = "button";
   close.textContent = "Cerrar";
-  close.onclick = () => backdrop.remove();
+  close.onclick = () => { backdrop.remove(); refresh(); };
   actions.appendChild(close);
   modal.appendChild(actions);
 
@@ -282,8 +282,101 @@ function openClientDetail(client, report) {
   document.body.appendChild(backdrop);
 
   backdrop.addEventListener("click", (ev) => {
-    if (ev.target === backdrop) backdrop.remove();
+    if (ev.target === backdrop) { backdrop.remove(); refresh(); }
   });
+}
+
+function indexInstallments(arr) {
+  const m = new Map();
+  if (Array.isArray(arr)) {
+    for (const it of arr) {
+      if (it && typeof it.n === "number") m.set(it.n, it);
+    }
+  }
+  return m;
+}
+
+function isPaidRow(r) {
+  return !!(r.form && r.date && r.amount != null && r.amount !== "");
+}
+
+function buildScheduleRow(r, refreshSummary, persist) {
+  const tr = document.createElement("tr");
+
+  const tdLabel = document.createElement("td");
+  tdLabel.textContent = r.label;
+
+  const tdAmount = document.createElement("td");
+  const amountInput = document.createElement("input");
+  amountInput.type = "number"; amountInput.min = "0"; amountInput.step = "0.01";
+  amountInput.placeholder = String(r.expected.toFixed(2));
+  amountInput.value = r.amount ?? "";
+  tdAmount.appendChild(amountInput);
+
+  const tdForm = document.createElement("td");
+  const formSelect = document.createElement("select");
+  formSelect.appendChild(opt("", "—"));
+  for (const f of PAYMENT_FORMS) formSelect.appendChild(opt(f, f));
+  formSelect.value = r.form || "";
+  tdForm.appendChild(formSelect);
+
+  const tdDate = document.createElement("td");
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.value = r.date || "";
+  tdDate.appendChild(dateInput);
+
+  const tdStatus = document.createElement("td");
+  const badge = document.createElement("span");
+  tdStatus.appendChild(badge);
+
+  function paintBadge() {
+    if (isPaidRow(r)) { badge.className = "badge ok"; badge.textContent = "Pagado"; }
+    else if ((r.amount != null && r.amount !== "") || r.form || r.date) {
+      badge.className = "badge partial"; badge.textContent = "Incompleto";
+    } else {
+      badge.className = "badge pending"; badge.textContent = "Pendiente";
+    }
+  }
+  paintBadge();
+
+  let pendingSave = false;
+  async function save() {
+    if (pendingSave) return;
+    pendingSave = true;
+    const { error } = await persist();
+    pendingSave = false;
+    if (error) toast(error.message, "error");
+  }
+
+  function onChange() {
+    r.amount = amountInput.value === "" ? null : Number(amountInput.value);
+    r.form   = formSelect.value;
+    r.date   = dateInput.value;
+
+    // Si llena forma+fecha pero el monto sigue vacio, asume el esperado.
+    if (r.form && r.date && (r.amount == null || r.amount === "")) {
+      r.amount = r.expected;
+      amountInput.value = String(r.expected);
+    }
+
+    paintBadge();
+    refreshSummary();
+    save();
+  }
+
+  amountInput.addEventListener("blur", onChange);
+  amountInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") amountInput.blur(); });
+  formSelect.addEventListener("change", onChange);
+  dateInput.addEventListener("change", onChange);
+
+  tr.append(tdLabel, tdAmount, tdForm, tdDate, tdStatus);
+  return tr;
+}
+
+function opt(value, label) {
+  const o = document.createElement("option");
+  o.value = value; o.textContent = label; return o;
 }
 
 function escapeHtml(s) {
