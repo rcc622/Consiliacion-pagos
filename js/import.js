@@ -33,9 +33,11 @@ function normalizeRow(row) {
     cliente: out.cliente || out.nombre || out.client || "",
     zona:    out.zona    || out.zone   || "",
     vendedor_email: (out.vendedor_email || out.vendedor || out.email || "").trim().toLowerCase(),
-    mes:    out.mes    || out.month  || "",
-    metodo: out.metodo || out.metodo_de_pago || out.method || "",
-    monto:  out.monto  || out.amount || "",
+    mes:      out.mes      || out.month   || "",
+    metodo:   out.metodo   || out.metodo_de_pago || out.method || "",
+    monto:    out.monto    || out.amount  || "",
+    enganche: out.enganche || out.down_payment || "",
+    anticipo: out.anticipo || out.advance     || "",
   };
 }
 
@@ -80,15 +82,25 @@ export async function importRows(rows, defaults = {}) {
         continue;
       }
     }
-    const amount = r.monto === "" ? null : Number(String(r.monto).replace(/[^0-9.\-]/g, ""));
+    const amount   = parseAmount(r.monto);
+    const enganche = parseAmount(r.enganche);
+    const anticipo = parseAmount(r.anticipo);
     toInsert.push({
       name: r.cliente,
       zone: defaultZone || r.zona || null,
       vendor_id: vid,
       payment_month:  defaultMonth || r.mes    || null,
       payment_method: r.metodo || null,
-      amount: Number.isFinite(amount) ? amount : null,
+      amount,
+      enganche,
+      anticipo,
     });
+  }
+
+  function parseAmount(raw) {
+    if (raw === "" || raw == null) return null;
+    const n = Number(String(raw).replace(/[^0-9.\-]/g, ""));
+    return Number.isFinite(n) ? n : null;
   }
 
   let inserted = 0;

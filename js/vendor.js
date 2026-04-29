@@ -36,7 +36,7 @@ function headerNode(profile) {
 
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
-    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount").order("name"),
+    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount, enganche, anticipo").order("name"),
     sb.from("payments_report").select("client_id, months_paid, total_amount, installments, updated_at"),
   ]);
 
@@ -145,24 +145,36 @@ function paintRowStatus(el, paid, expected) {
 // === Schedule por método ====================================================
 
 // Devuelve [{n, label, expected_amount}] segun el metodo del cliente.
+// Si el cliente tiene enganche o anticipo, se descuentan del total antes de
+// calcular las mensualidades y se agregan como filas propias del schedule.
 function buildSchedule(client) {
-  const total  = Number(client.amount || 0);
-  const method = client.payment_method || "";
+  const total    = Number(client.amount   || 0);
+  const enganche = Number(client.enganche || 0);
+  const anticipo = Number(client.anticipo || 0);
+  const method   = client.payment_method || "";
 
   if (method.startsWith("Contado Parcial-")) {
-    const enganche    = +(total * 0.5).toFixed(2);
-    const mensualidad = +(total - enganche).toFixed(2);
+    if (enganche > 0 || anticipo > 0) {
+      const out = [];
+      if (enganche > 0) out.push({ n: 0,  label: "Enganche", expected_amount: enganche });
+      if (anticipo > 0) out.push({ n: -2, label: "Anticipo", expected_amount: anticipo });
+      out.push({ n: 1, label: "Mensualidad final", expected_amount: +(total - enganche - anticipo).toFixed(2) });
+      return out;
+    }
+    const eng = +(total * 0.5).toFixed(2);
     return [
-      { n: 0, label: "Enganche (50%)",    expected_amount: enganche },
-      { n: 1, label: "Mensualidad final", expected_amount: mensualidad },
+      { n: 0, label: "Enganche (50%)",    expected_amount: eng },
+      { n: 1, label: "Mensualidad final", expected_amount: +(total - eng).toFixed(2) },
     ];
   }
 
   const msi = method.match(/^(\d+) Meses Sin Intereses$/) || method.match(/(\d+) MSI$/);
   if (msi) {
     const n = parseInt(msi[1], 10);
-    const mensualidad = +(total / n).toFixed(2);
+    const mensualidad = +((total - enganche - anticipo) / n).toFixed(2);
     const out = [];
+    if (enganche > 0) out.push({ n: -1, label: "Enganche", expected_amount: enganche });
+    if (anticipo > 0) out.push({ n: -2, label: "Anticipo", expected_amount: anticipo });
     for (let i = 1; i <= n; i++) {
       out.push({ n: i, label: `Mensualidad ${i} de ${n}`, expected_amount: mensualidad });
     }
@@ -170,11 +182,37 @@ function buildSchedule(client) {
   }
 
   // Anticipo Mejoravit / Financiamiento / fallback
-  return [{ n: 1, label: "Plan personalizado", expected_amount: total }];
+  if (enganche === 0 && anticipo === 0) {
+    return [{ n: 1, label: "Plan personalizado", expected_amount: total }];
+  }
+  const out = [];
+  if (enganche > 0) out.push({ n: -1, label: "Enganche", expected_amount: enganche });
+  if (anticipo > 0) out.push({ n: -2, label: "Anticipo", expected_amount: anticipo });
+  out.push({ n: 1, label: "Restante", expected_amount: +(total - enganche - anticipo).toFixed(2) });
+  return out;
 }
 
 function expectedInstallmentCount(client) {
   return buildSchedule(client).length;
+}
+
+// Importe diferido por mes para el método del cliente. Devuelve null si el
+// método no es a meses (no hay base para un "diferido").
+function deferredMonthly(client) {
+  const method = client.payment_method || "";
+  const msi = method.match(/^(\d+) Meses Sin Intereses$/) || method.match(/(\d+) MSI$/);
+  if (!msi) return null;
+  const n = parseInt(msi[1], 10);
+  if (!n) return null;
+  const total    = Number(client.amount   || 0);
+  const enganche = Number(client.enganche || 0);
+  const anticipo = Number(client.anticipo || 0);
+  return +((total - enganche - anticipo) / n).toFixed(2);
+}
+
+function fmtMoneyOrNA(n) {
+  const v = Number(n || 0);
+  return v ? fmtMoney(v) : "N/A";
 }
 
 // === Modal de detalle =======================================================
@@ -193,11 +231,15 @@ function openClientDetail(client, report, profile, refresh) {
 
   const meta = document.createElement("div");
   meta.className = "detail-meta";
+  const diferido = deferredMonthly(client);
   meta.innerHTML = `
     <div><span class="muted">Zona</span><strong>${escapeHtml(client.zone || "—")}</strong></div>
     <div><span class="muted">Mes</span><strong>${escapeHtml(client.payment_month || "—")}</strong></div>
     <div><span class="muted">Método</span><strong>${escapeHtml(client.payment_method || "—")}</strong></div>
     <div><span class="muted">Total</span><strong>${client.amount != null ? fmtMoney(client.amount) : "—"}</strong></div>
+    <div><span class="muted">Enganche</span><strong>${fmtMoneyOrNA(client.enganche)}</strong></div>
+    <div><span class="muted">Anticipo</span><strong>${fmtMoneyOrNA(client.anticipo)}</strong></div>
+    <div><span class="muted">Restante diferido</span><strong>${diferido == null ? "N/A" : `${fmtMoney(diferido)} / mes`}</strong></div>
   `;
   modal.appendChild(meta);
 

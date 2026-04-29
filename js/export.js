@@ -16,6 +16,9 @@ const COLUMNS = [
   "Vendedor",
   "Método de pago",
   "Monto contratado",
+  "Enganche",
+  "Anticipo",
+  "Restante diferido",
   "Mens. reportadas",
   "Monto reportado",
   "Adeudo",
@@ -25,7 +28,7 @@ const COLUMNS = [
 async function fetchData() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo"),
     sb.from("payments_report").select("client_id, months_paid, total_amount"),
   ]);
   for (const r of [vendorsRes, clientsRes, reportsRes]) {
@@ -45,7 +48,9 @@ function buildRows({ vendors, clients, reports }) {
   return clients.map((c) => {
     const v = vendorById.get(c.vendor_id);
     const r = reportByClient.get(c.id);
-    const monto = Number(c.amount || 0);
+    const monto    = Number(c.amount   || 0);
+    const enganche = Number(c.enganche || 0);
+    const anticipo = Number(c.anticipo || 0);
     const pagado = Number(r?.total_amount || 0);
     const adeudo = Math.max(0, monto - pagado);
     const reported = !!(r && (r.months_paid || r.total_amount));
@@ -56,12 +61,23 @@ function buildRows({ vendors, clients, reports }) {
       vendedor: v ? (v.full_name || v.email) : "—",
       metodo: c.payment_method || "—",
       monto,
+      enganche: enganche || "N/A",
+      anticipo: anticipo || "N/A",
+      restante_diferido: deferredMonthly(c.payment_method, monto, enganche, anticipo) ?? "N/A",
       mens_reportadas: r?.months_paid ?? "",
       monto_reportado: pagado,
       adeudo,
       estado: reported ? "Reportado" : "Pendiente",
     };
   });
+}
+
+function deferredMonthly(method, total, enganche, anticipo) {
+  const m = (method || "").match(/^(\d+) Meses Sin Intereses$/) || (method || "").match(/(\d+) MSI$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  if (!n) return null;
+  return +((total - enganche - anticipo) / n).toFixed(2);
 }
 
 function groupByMonthZone(rows) {
@@ -121,6 +137,9 @@ function rowToArray(row) {
     row.vendedor,
     row.metodo,
     row.monto,
+    row.enganche,
+    row.anticipo,
+    row.restante_diferido,
     row.mens_reportadas,
     row.monto_reportado,
     row.adeudo,
@@ -148,7 +167,8 @@ function exportXLSX(grouped, filename) {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!cols"] = [
       { wch: 28 }, { wch: 22 }, { wch: 26 },
-      { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
+      { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 },
+      { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
     ];
     const sheetName = sanitizeSheetName(monthGroup.mes);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);

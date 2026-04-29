@@ -123,7 +123,7 @@ function buildToolbar(refresh) {
 async function loadAll() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo"),
     sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -380,7 +380,9 @@ async function editClientFlow(client, vendors, refresh) {
         name: "payment_method", label: "Método de pago", type: "select", value: client.payment_method || "",
         options: catalogOptions(METHODS, client.payment_method),
       },
-      { name: "amount", label: "Monto ($)", type: "number", value: client.amount ?? "" },
+      { name: "amount",   label: "Monto ($)",    type: "number", value: client.amount   ?? "" },
+      { name: "enganche", label: "Enganche ($)", type: "number", value: client.enganche ?? "" },
+      { name: "anticipo", label: "Anticipo ($)", type: "number", value: client.anticipo ?? "" },
     ],
   });
   if (!data) return;
@@ -391,7 +393,9 @@ async function editClientFlow(client, vendors, refresh) {
     vendor_id: data.vendor_id,
     payment_month:  data.payment_month  || null,
     payment_method: data.payment_method || null,
-    amount: data.amount === "" ? null : Number(data.amount),
+    amount:   data.amount   === "" ? null : Number(data.amount),
+    enganche: data.enganche === "" ? null : Number(data.enganche),
+    anticipo: data.anticipo === "" ? null : Number(data.anticipo),
   };
 
   const { error } = await sb.from("clients").update(update).eq("id", client.id);
@@ -713,7 +717,9 @@ async function addClientFlow(refresh) {
         name: "payment_method", label: "Método de pago", type: "select",
         options: catalogOptions(METHODS, ""),
       },
-      { name: "amount", label: "Monto ($)", type: "number" },
+      { name: "amount",   label: "Monto ($)",    type: "number" },
+      { name: "enganche", label: "Enganche ($)", type: "number" },
+      { name: "anticipo", label: "Anticipo ($)", type: "number" },
     ],
   });
   if (!data) return;
@@ -724,7 +730,9 @@ async function addClientFlow(refresh) {
     vendor_id: data.vendor_id,
     payment_month:  data.payment_month  || null,
     payment_method: data.payment_method || null,
-    amount: data.amount === "" ? null : Number(data.amount),
+    amount:   data.amount   === "" ? null : Number(data.amount),
+    enganche: data.enganche === "" ? null : Number(data.enganche),
+    anticipo: data.anticipo === "" ? null : Number(data.anticipo),
   });
   if (insErr) { toast(insErr.message, "error"); return; }
   toast("Cliente creado.", "success");
