@@ -272,7 +272,12 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     label.className = "muted";
     label.textContent = `${selected.size} seleccionado${selected.size === 1 ? "" : "s"}`;
 
+    const reassignBtn = document.createElement("button");
+    reassignBtn.textContent = "Reasignar vendedor";
+    reassignBtn.onclick = () => reassignFlow([...selected], vendors, refresh);
+
     const editBtn = document.createElement("button");
+    editBtn.className = "ghost";
     editBtn.textContent = "Editar selección";
     editBtn.onclick = () => bulkEditSelectedFlow([...selected], vendors, refresh);
 
@@ -281,7 +286,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     delBtn.textContent = "Eliminar selección";
     delBtn.onclick = () => bulkDeleteSelectedFlow([...selected], refresh);
 
-    selBar.append(label, editBtn, delBtn);
+    selBar.append(label, reassignBtn, editBtn, delBtn);
   }
 
   for (const c of clients) {
@@ -308,10 +313,12 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     // Resto de columnas
     const dif = deferredMonthly(c);
     const status = clientStatus(c, reported);
+    const vendorName = v ? (v.full_name || v.email) : "—";
+    const vendorClass = isAsesorPlaceholder(v) ? "vendor-asesor" : "";
     const fixedHtml = `
       <td>${escapeHtml(c.name)}</td>
       <td>${escapeHtml(displayDueDate(c))}</td>
-      <td>${escapeHtml(v ? (v.full_name || v.email) : "—")}</td>
+      <td class="${vendorClass}">${escapeHtml(vendorName)}</td>
       <td>${escapeHtml(c.payment_method || "—")}</td>
       <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
       <td>${fmtMoneyOrNA(c.enganche)}</td>
@@ -325,7 +332,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     tmpl.innerHTML = fixedHtml.trim();
     while (tmpl.content.firstChild) tr.appendChild(tmpl.content.firstChild);
 
-    // Celda acciones (lapiz + eliminar)
+    // Celda acciones (lapiz + reasignar + eliminar)
     const tdActions = document.createElement("td");
     tdActions.style.whiteSpace = "nowrap";
 
@@ -335,12 +342,18 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     editBtn.textContent = "✏️";
     editBtn.onclick = () => editClientFlow(c, vendors, refresh);
 
+    const reassignBtn = document.createElement("button");
+    reassignBtn.className = "ghost icon-btn";
+    reassignBtn.title = "Reasignar vendedor";
+    reassignBtn.textContent = "↩";
+    reassignBtn.onclick = () => reassignFlow([c.id], vendors, refresh);
+
     const delBtn = document.createElement("button");
     delBtn.className = "icon-danger";
     delBtn.textContent = "Eliminar";
     delBtn.onclick = () => deleteClientFlow(c, refresh);
 
-    tdActions.append(editBtn, delBtn);
+    tdActions.append(editBtn, reassignBtn, delBtn);
     tr.appendChild(tdActions);
 
     tbody.appendChild(tr);
@@ -771,6 +784,36 @@ function isFutureDue(due_date) {
   if (isNaN(dt)) return false;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   return dt > today;
+}
+
+// Vendedor "placeholder" (asesor / asesor comercial / similar). Se pinta en
+// itálicas grises para que el master los detecte y reasigne fácil.
+function isAsesorPlaceholder(vendor) {
+  if (!vendor) return false;
+  const name = (vendor.full_name || "").toLowerCase().trim();
+  if (!name) return false;
+  return /\basesor( comercial)?\b/.test(name);
+}
+
+async function reassignFlow(ids, vendors, refresh) {
+  if (!ids.length) return;
+  const data = await openModal({
+    title: ids.length === 1 ? "Reasignar vendedor" : `Reasignar ${ids.length} clientes`,
+    submitLabel: "Aplicar",
+    fields: [
+      {
+        name: "vendor_id", label: "Vendedor", type: "select", required: true,
+        options: [{ value: "", label: "—" }, ...vendors.map((v) => ({ value: v.id, label: v.full_name || v.email }))],
+      },
+    ],
+  });
+  if (!data) return;
+  if (!data.vendor_id) { toast("Selecciona un vendedor.", "info"); return; }
+
+  const { error } = await sb.from("clients").update({ vendor_id: data.vendor_id }).in("id", ids);
+  if (error) { toast(error.message, "error"); return; }
+  toast(`${ids.length} cliente${ids.length === 1 ? "" : "s"} reasignado${ids.length === 1 ? "" : "s"}.`, "success");
+  refresh();
 }
 
 // Reportado > Pte por vencer (futuro y sin captura) > Pendiente.

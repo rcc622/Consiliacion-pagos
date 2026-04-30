@@ -247,6 +247,11 @@ td.notes-cell {
   color: var(--muted);
 }
 
+td.vendor-asesor {
+  font-style: italic;
+  color: var(--muted);
+}
+
 .ea-editor {
   display: flex;
   flex-direction: column;
