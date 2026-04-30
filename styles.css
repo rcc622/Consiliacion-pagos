@@ -232,7 +232,10 @@ td input.money-editor {
 .ea-editor .ea-form-select {
   padding: 4px 6px;
   font-size: 12px;
+  text-align: right;
+  text-align-last: right;
 }
+.ea-editor .ea-form-select option { text-align: left; }
 .ea-editor .ea-form-select:disabled {
   background: var(--bg);
   color: var(--muted);
