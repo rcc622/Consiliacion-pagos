@@ -80,12 +80,14 @@ Cualquier servidor estático sirve (Vercel, GitHub Pages, Netlify, etc.).
 
 Columnas (insensibles a mayúsculas/acentos/espacios). Las 3 primeras son obligatorias, el resto opcionales:
 
-| cliente       | zona  | vendedor_email     | mes   | metodo     | monto |
-|---------------|-------|--------------------|-------|------------|-------|
-| Juan Pérez    | Norte | juan@empresa.com   | Marzo | Contado    | 5000  |
-| Comercial XYZ | Sur   | maria@empresa.com  | Abril | Financiado | 1200  |
+| cliente       | zona  | vendedor_email     | mes   | metodo                  | monto | enganche | anticipo |
+|---------------|-------|--------------------|-------|-------------------------|-------|----------|----------|
+| Juan Pérez    | Norte | juan@empresa.com   | Marzo | 12 Meses Sin Intereses  | 60000 | 10000    | 5000     |
+| Comercial XYZ | Sur   | maria@empresa.com  | Abril | Financiamiento          | 12000 |          |          |
 
-> Los valores válidos para `metodo` son **Contado** o **Financiado**. La importación acepta cualquier texto, pero los selects de la app solo permiten esos dos.
+> `metodo` debe coincidir con uno del catálogo de la app (ej. `Contado Riguroso-Direc`, `12 Meses Sin Intereses`, `Anticipo Mejoravit-MSI`, `Financiamiento`, etc.). La importación acepta cualquier texto, pero los selects de la app solo permiten valores del catálogo.
+
+> `enganche` y `anticipo` son montos en pesos. Se descuentan del `monto` para calcular el restante diferido por mes (`(monto - enganche - anticipo) / meses`). Si los dejas en blanco o en 0, se muestran como **N/A** en la tarjeta del cliente.
 
 Filas con `vendedor_email` desconocido se reportan como error y no rompen el resto del import.
 

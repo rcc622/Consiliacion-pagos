@@ -259,6 +259,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       <th class="check-col"><input type="checkbox" data-role="select-all" /></th>
       <th>Cliente</th><th>Mes</th><th>Zona</th><th>Vendedor</th>
       <th>Método de pago</th><th>Monto</th>
+      <th>Enganche</th><th>Anticipo</th><th>Diferido / mes</th>
       <th># Mens. reportadas</th><th>Monto reportado</th><th>Estado</th>
       <th></th>
     </tr></thead>`;
@@ -308,6 +309,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     tr.appendChild(tdCheck);
 
     // Resto de columnas
+    const dif = deferredMonthly(c);
     const fixedHtml = `
       <td>${escapeHtml(c.name)}</td>
       <td>${escapeHtml(c.payment_month || "—")}</td>
@@ -315,6 +317,9 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       <td>${escapeHtml(v ? (v.full_name || v.email) : "—")}</td>
       <td>${escapeHtml(c.payment_method || "—")}</td>
       <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
+      <td>${fmtMoneyOrNA(c.enganche)}</td>
+      <td>${fmtMoneyOrNA(c.anticipo)}</td>
+      <td>${dif == null ? "N/A" : fmtMoney(dif)}</td>
       <td>${r?.months_paid ?? "—"}</td>
       <td>${r?.total_amount != null ? fmtMoney(r.total_amount) : "—"}</td>
       <td><span class="badge ${reported ? "ok" : "pending"}">${reported ? "Reportado" : "Pendiente"}</span></td>`;
@@ -743,4 +748,18 @@ function escapeHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function fmtMoneyOrNA(n) {
+  const v = Number(n || 0);
+  return v ? fmtMoney(v) : "N/A";
+}
+
+function deferredMonthly(client) {
+  const method = client.payment_method || "";
+  const msi = method.match(/^(\d+) Meses Sin Intereses$/) || method.match(/(\d+) MSI$/);
+  if (!msi) return null;
+  const n = parseInt(msi[1], 10);
+  if (!n) return null;
+  return +((Number(client.amount || 0) - Number(client.enganche || 0) - Number(client.anticipo || 0)) / n).toFixed(2);
 }
