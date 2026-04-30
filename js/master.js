@@ -8,22 +8,19 @@ import { exportConciliation } from "./export.js";
 const ZONES = [
   "Monterrey","Saltillo","Chihuahua","MTY Foraneo","FORANEO","COMERCIAL MTY",
 ];
+// Catálogo normalizado:
+// - MSI colapsa todos los "X Meses Sin Intereses" / "X MSI".
+// - Mejoravit colapsa "Contado * Mejoravit", "mejoravit y contado", etc.
+// - Mejoravit-MSI colapsa "Anticipo Mejoravit-MSI", "Anticipo Mejoravit 24 MSI", "mejoravit y msi".
 const METHODS = [
   "Contado Riguroso-Direc",
-  "Contado Riguroso-Mejoravit",
   "Contado Parcial-Direc",
-  "Contado Parcial-Mejoravit",
-  "Anticipo Mejoravit-MSI",
-  "Anticipo Mejoravit 24 MSI",
+  "MSI",
+  "Mejoravit",
+  "Mejoravit-MSI",
   "FIDE",
   "FIDE-DIRECTO",
   "Financiamiento",
-  "3 Meses Sin Intereses",
-  "6 Meses Sin Intereses",
-  "10 Meses Sin Intereses",
-  "12 Meses Sin Intereses",
-  "18 Meses Sin Intereses",
-  "24 Meses Sin Intereses",
 ];
 
 // Construye opciones para un select de un catalogo cerrado, agregando el
@@ -119,7 +116,7 @@ function buildToolbar(refresh) {
 async function loadAll() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active"),
     sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -253,10 +250,13 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   tableEl.innerHTML = `
     <thead><tr>
       <th class="check-col"><input type="checkbox" data-role="select-all" /></th>
-      <th>Cliente</th><th>Fecha de vencimiento</th><th>Vendedor</th>
-      <th>Método de pago</th><th>Monto</th>
-      <th>Enganche</th><th>Anticipo</th><th>Diferido / mes</th>
-      <th># Mens. reportadas</th><th>Monto reportado</th><th>Estado</th>
+      <th>Cliente</th>
+      <th>Vendedor</th>
+      <th>Método de pago</th>
+      <th>Monto</th>
+      <th>Conciliado</th>
+      <th>Estado</th>
+      <th>Activo</th>
       <th>Notas</th>
       <th></th>
     </tr></thead>`;
@@ -311,22 +311,18 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     tr.appendChild(tdCheck);
 
     // Resto de columnas
-    const dif = deferredMonthly(c);
-    const status = clientStatus(c, reported);
+    const conciliado = Number(r?.total_amount || 0);
+    const status = clientStatus(c, conciliado);
     const vendorName = v ? (v.full_name || v.email) : "—";
     const vendorClass = isAsesorPlaceholder(v) ? "vendor-asesor" : "";
     const fixedHtml = `
       <td>${escapeHtml(c.name)}</td>
-      <td>${escapeHtml(displayDueDate(c))}</td>
       <td class="${vendorClass}">${escapeHtml(vendorName)}</td>
       <td>${escapeHtml(c.payment_method || "—")}</td>
       <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
-      <td>${fmtMoneyOrNA(c.enganche)}</td>
-      <td>${fmtMoneyOrNA(c.anticipo)}</td>
-      <td>${dif == null ? "N/A" : fmtMoney(dif)}</td>
-      <td>${r?.months_paid ?? "—"}</td>
-      <td>${r?.total_amount != null ? fmtMoney(r.total_amount) : "—"}</td>
+      <td>${fmtMoney(conciliado)}</td>
       <td><span class="badge ${status.cls}">${status.label}</span></td>
+      <td>${c.is_active ? '<span class="badge ok">Activo</span>' : "—"}</td>
       <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
     const tmpl = document.createElement("template");
     tmpl.innerHTML = fixedHtml.trim();
@@ -380,11 +376,6 @@ async function editClientFlow(client, vendors, refresh) {
     submitLabel: "Guardar",
     fields: [
       { name: "name", label: "Nombre del cliente", type: "text", required: true, value: client.name || "" },
-      { name: "due_date", label: "Fecha de vencimiento", type: "date", value: client.due_date || "" },
-      {
-        name: "zone", label: "Zona", type: "select", value: client.zone || "",
-        options: catalogOptions(ZONES, client.zone),
-      },
       {
         name: "vendor_id", label: "Vendedor", type: "select", value: client.vendor_id || "",
         options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
@@ -393,18 +384,16 @@ async function editClientFlow(client, vendors, refresh) {
         name: "payment_method", label: "Método de pago", type: "select", value: client.payment_method || "",
         options: catalogOptions(METHODS, client.payment_method),
       },
-      { name: "amount",   label: "Monto ($)",    type: "number", value: client.amount   ?? "" },
-      { name: "enganche", label: "Enganche ($)", type: "number", value: client.enganche ?? "" },
-      { name: "anticipo", label: "Anticipo ($)", type: "number", value: client.anticipo ?? "" },
+      { name: "amount",   label: "Monto ($)",              type: "number", value: client.amount   ?? "" },
+      { name: "enganche", label: "Enganche ($) — opc",     type: "number", value: client.enganche ?? "" },
+      { name: "anticipo", label: "Anticipo ($) — opc",     type: "number", value: client.anticipo ?? "" },
     ],
   });
   if (!data) return;
 
   const update = {
     name: data.name,
-    zone: data.zone || null,
     vendor_id: data.vendor_id,
-    due_date: data.due_date || null,
     payment_method: data.payment_method || null,
     amount:   data.amount   === "" ? null : Number(data.amount),
     enganche: data.enganche === "" ? null : Number(data.enganche),
@@ -714,11 +703,6 @@ async function addClientFlow(refresh) {
     submitLabel: "Crear",
     fields: [
       { name: "name", label: "Nombre del cliente", type: "text", required: true },
-      { name: "due_date", label: "Fecha de vencimiento", type: "date" },
-      {
-        name: "zone", label: "Zona", type: "select",
-        options: catalogOptions(ZONES, ""),
-      },
       {
         name: "vendor_id", label: "Vendedor", type: "select",
         options: vendors.map((v) => ({ value: v.id, label: v.full_name || v.email })),
@@ -727,18 +711,16 @@ async function addClientFlow(refresh) {
         name: "payment_method", label: "Método de pago", type: "select",
         options: catalogOptions(METHODS, ""),
       },
-      { name: "amount",   label: "Monto ($)",    type: "number" },
-      { name: "enganche", label: "Enganche ($)", type: "number" },
-      { name: "anticipo", label: "Anticipo ($)", type: "number" },
+      { name: "amount",   label: "Monto ($)",          type: "number" },
+      { name: "enganche", label: "Enganche ($) — opc", type: "number" },
+      { name: "anticipo", label: "Anticipo ($) — opc", type: "number" },
     ],
   });
   if (!data) return;
 
   const { error: insErr } = await sb.from("clients").insert({
     name: data.name,
-    zone: data.zone || null,
     vendor_id: data.vendor_id,
-    due_date: data.due_date || null,
     payment_method: data.payment_method || null,
     amount:   data.amount   === "" ? null : Number(data.amount),
     enganche: data.enganche === "" ? null : Number(data.enganche),
@@ -755,36 +737,6 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-function fmtMoneyOrNA(n) {
-  const v = Number(n || 0);
-  return v ? fmtMoney(v) : "N/A";
-}
-
-function deferredMonthly(client) {
-  const method = client.payment_method || "";
-  const msi = method.match(/^(\d+) Meses Sin Intereses$/) || method.match(/(\d+) MSI$/);
-  if (!msi) return null;
-  const n = parseInt(msi[1], 10);
-  if (!n) return null;
-  return +((Number(client.amount || 0) - Number(client.enganche || 0) - Number(client.anticipo || 0)) / n).toFixed(2);
-}
-
-// Muestra due_date en formato local; cae a payment_month para datos legacy.
-function displayDueDate(client) {
-  if (client.due_date) {
-    const dt = new Date(client.due_date + "T00:00:00");
-    if (!isNaN(dt)) return dt.toLocaleDateString("es-MX");
-  }
-  return client.payment_month || "—";
-}
-
-function isFutureDue(due_date) {
-  if (!due_date) return false;
-  const dt = new Date(due_date + "T00:00:00");
-  if (isNaN(dt)) return false;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return dt > today;
-}
 
 // Vendedor "placeholder" (asesor / asesor comercial / similar). Se pinta en
 // itálicas grises para que el master los detecte y reasigne fácil.
@@ -816,9 +768,10 @@ async function reassignFlow(ids, vendors, refresh) {
   refresh();
 }
 
-// Reportado > Pte por vencer (futuro y sin captura) > Pendiente.
-function clientStatus(client, reported) {
-  if (reported) return { cls: "ok", label: "Reportado" };
-  if (isFutureDue(client.due_date)) return { cls: "partial", label: "Pte por vencer" };
+// Estado derivado del conciliado vs monto contratado.
+function clientStatus(client, conciliado) {
+  const monto = Number(client.amount || 0);
+  if (monto > 0 && conciliado >= monto) return { cls: "ok", label: "Conciliado" };
+  if (conciliado > 0) return { cls: "partial", label: "Parcial" };
   return { cls: "pending", label: "Pendiente" };
 }

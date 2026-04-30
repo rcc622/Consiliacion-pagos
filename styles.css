@@ -281,6 +281,54 @@ td.vendor-asesor {
 .badge.pending { background: #fef3c7; color: var(--warning); }
 .badge.partial { background: #dbeafe; color: var(--primary); }
 
+/* Vendedor placeholder ("asesor" / "asesor comercial") */
+td.vendor-asesor {
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* Sección de info opcional dentro del modal de detalle */
+.client-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 16px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 8px;
+}
+.client-info-grid .info-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+.client-info-grid .info-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.client-info-grid .info-field-action { justify-content: flex-end; }
+.client-info-grid .info-field-action button { padding: 6px 10px; }
+.client-info-grid .info-field-action button.active-on {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+/* Header de sección "Pagos capturados" + botón Agregar fila */
+.pay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0 4px;
+}
+.pay-title {
+  font-size: 14px;
+  margin: 0;
+  color: var(--text);
+}
+.pay-head button { padding: 6px 12px; font-size: 13px; }
+
 a.row-link {
   color: var(--primary);
   font-weight: 600;

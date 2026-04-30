@@ -1,10 +1,29 @@
-// Vista vendedor: tabla resumen de sus clientes + modal con detalle por mensualidad.
+// Vista vendedor: tabla resumen de sus clientes + modal con captura libre.
+//
+// Modelo simplificado (sin schedule auto-calculado):
+//   - El vendor agrega filas manualmente con "+ Agregar fila".
+//   - Cada fila: monto + forma de pago + fecha + status.
+//   - Conciliado = suma de filas con monto > 0.
+//   - Estado del cliente derivado de conciliado vs monto contratado.
+//   - Enganche, anticipo y método de pago son campos informativos opcionales.
+//   - Activo: bandera del cliente que indica al admin que la diferencia
+//     entre monto y conciliado es esperada (cliente sigue pagando).
 
 import { sb } from "./supabase.js";
 import { clear, toast, fmtMoney } from "./ui.js";
 import { getProfile } from "./auth.js";
 
 const PAYMENT_FORMS = ["Efectivo", "Transferencia", "Link de pago"];
+const METHODS = [
+  "Contado Riguroso-Direc",
+  "Contado Parcial-Direc",
+  "MSI",
+  "Mejoravit",
+  "Mejoravit-MSI",
+  "FIDE",
+  "FIDE-DIRECTO",
+  "Financiamiento",
+];
 
 export async function renderVendor() {
   const root = document.getElementById("view-vendor");
@@ -36,8 +55,10 @@ function headerNode(profile) {
 
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
-    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount, enganche, anticipo, notes, due_date").order("name"),
-    sb.from("payments_report").select("client_id, months_paid, total_amount, installments, updated_at"),
+    sb.from("clients")
+      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference")
+      .order("name"),
+    sb.from("payments_report").select("client_id, total_amount, installments, updated_at"),
   ]);
 
   if (clientsRes.error) { toast(clientsRes.error.message, "error"); throw clientsRes.error; }
@@ -47,22 +68,18 @@ async function loadData() {
 }
 
 function paintSummary(container, clients, reports) {
-  const reportedIds = new Set(reports.filter(isReportedAtAll).map((r) => r.client_id));
+  const reportedIds = new Set(reports.filter((r) => Number(r?.total_amount) > 0).map((r) => r.client_id));
   const reportedCount = clients.filter((c) => reportedIds.has(c.id)).length;
   const total = clients.length;
-  const totalAmount = reports.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+  const totalConciliado = reports.reduce((s, r) => s + Number(r.total_amount || 0), 0);
 
   clear(container);
   container.append(
     stat("Asignados", total),
     stat("Con captura", `${reportedCount} / ${total}`),
     stat("Pendientes", total - reportedCount),
-    stat("Monto cobrado", fmtMoney(totalAmount)),
+    stat("Conciliado", fmtMoney(totalConciliado)),
   );
-}
-
-function isReportedAtAll(r) {
-  return r && (r.months_paid > 0 || Number(r.total_amount) > 0);
 }
 
 function stat(label, value, kind = "") {
@@ -83,14 +100,11 @@ function paintTable(container, clients, reports, profile, refresh) {
   thead.innerHTML = `
     <tr>
       <th>Cliente</th>
-      <th>Fecha de vencimiento</th>
       <th>Método de pago</th>
       <th>Monto</th>
-      <th>Enganche</th>
-      <th>Anticipo</th>
-      <th>Pagadas / Total</th>
-      <th>Cobrado</th>
+      <th>Conciliado</th>
       <th>Estado</th>
+      <th>Activo</th>
       <th>Notas</th>
     </tr>`;
   table.appendChild(thead);
@@ -115,39 +129,44 @@ function rowFor(client, report, profile, refresh) {
   link.onclick = (ev) => { ev.preventDefault(); openClientDetail(client, report, profile, refresh); };
   tdName.appendChild(link);
 
-  const tdDue     = document.createElement("td"); tdDue.textContent     = displayDueDate(client);
   const tdMethod  = document.createElement("td"); tdMethod.textContent  = client.payment_method || "—";
   const tdAmount  = document.createElement("td"); tdAmount.textContent  = client.amount != null ? fmtMoney(client.amount) : "—";
 
-  const tdEnganche = document.createElement("td");
-  tdEnganche.appendChild(engancheAnticipoEditor(client, report, profile, "enganche", refresh));
-
-  const tdAnticipo = document.createElement("td");
-  tdAnticipo.appendChild(engancheAnticipoEditor(client, report, profile, "anticipo", refresh));
-
-  const expected = expectedInstallmentCount(client);
-  const paid = paidMensualidadCount(client, report);
-  const tdProgress = document.createElement("td");
-  tdProgress.textContent = expected ? `${paid} / ${expected}` : "—";
-
-  const tdCobrado = document.createElement("td");
-  tdCobrado.textContent = report?.total_amount != null ? fmtMoney(report.total_amount) : fmtMoney(0);
+  const conciliado = Number(report?.total_amount || 0);
+  const tdConc = document.createElement("td");
+  tdConc.textContent = fmtMoney(conciliado);
 
   const tdStatus = document.createElement("td");
   const badge = document.createElement("span");
-  paintRowStatus(badge, paid, expected, client);
+  paintRowStatus(badge, client, conciliado);
   tdStatus.appendChild(badge);
+
+  const tdActive = document.createElement("td");
+  if (client.is_active) {
+    const b = document.createElement("span");
+    b.className = "badge ok";
+    b.textContent = "Activo";
+    tdActive.appendChild(b);
+  } else {
+    tdActive.textContent = "—";
+    tdActive.className = "muted";
+  }
 
   const tdNotes = document.createElement("td");
   tdNotes.appendChild(notesEditor(client));
 
-  tr.append(tdName, tdDue, tdMethod, tdAmount, tdEnganche, tdAnticipo, tdProgress, tdCobrado, tdStatus, tdNotes);
+  tr.append(tdName, tdMethod, tdAmount, tdConc, tdStatus, tdActive, tdNotes);
   return tr;
 }
 
-// Textarea inline para notes. Persiste en clients.notes via UPDATE
-// (RLS clients_vendor_update permite que el vendedor escriba sus propios
-// clientes). Escape limpia y blur guardan.
+function paintRowStatus(el, client, conciliado) {
+  const monto = Number(client.amount || 0);
+  if (monto > 0 && conciliado >= monto) { el.className = "badge ok"; el.textContent = "Conciliado"; return; }
+  if (conciliado > 0) { el.className = "badge partial"; el.textContent = "Parcial"; return; }
+  el.className = "badge pending"; el.textContent = "Pendiente";
+}
+
+// Textarea inline para notes. Persiste en clients.notes via UPDATE.
 function notesEditor(client) {
   const ta = document.createElement("textarea");
   ta.className = "notes-editor";
@@ -181,239 +200,6 @@ function notesEditor(client) {
   return ta;
 }
 
-// Editor inline para enganche/anticipo: monto + forma de pago en una sola
-// celda. Al cambiar cualquiera de los dos:
-//   1. Actualiza public.clients.{field} (monto contratado).
-//   2. Sincroniza la fila correspondiente en payments_report.installments
-//      (sin fecha, porque para enganche/anticipo no aplica).
-function engancheAnticipoEditor(client, report, profile, field, refresh) {
-  const wrap = document.createElement("div");
-  wrap.className = "ea-editor";
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.inputMode = "decimal";
-  input.placeholder = "N/A";
-  input.className = "money-editor";
-
-  const select = document.createElement("select");
-  select.className = "ea-form-select";
-  select.appendChild(opt("", "—"));
-  for (const f of PAYMENT_FORMS) select.appendChild(opt(f, f));
-
-  function currentInstallment() {
-    const target = buildSchedule(client).find((s) => s.kind === field);
-    if (!target || !Array.isArray(report?.installments)) return null;
-    return report.installments.find((it) => it.n === target.n) || null;
-  }
-
-  function paint() {
-    const v = Number(client[field] || 0);
-    input.value = v ? fmtMoney(v) : "";
-    select.value = currentInstallment()?.form || "";
-    select.disabled = !v;
-  }
-  paint();
-
-  input.addEventListener("focus", () => {
-    const v = Number(client[field] || 0);
-    input.value = v ? String(v) : "";
-    setTimeout(() => input.select(), 0);
-  });
-
-  let saving = false;
-  async function save(newAmount, newForm) {
-    if (saving) return;
-    saving = true;
-    try {
-      if ((client[field] ?? null) !== (newAmount ?? null)) {
-        const { error } = await sb.from("clients").update({ [field]: newAmount }).eq("id", client.id);
-        if (error) throw error;
-        client[field] = newAmount;
-      }
-
-      const schedule = buildSchedule(client);
-      const target = schedule.find((s) => s.kind === field);
-      let installments = Array.isArray(report?.installments) ? [...report.installments] : [];
-
-      if (target) {
-        installments = installments.filter((it) => it.n !== target.n);
-        if (newAmount && newAmount > 0 && newForm) {
-          installments.push({ n: target.n, amount: Number(newAmount), form: newForm, date: "" });
-        }
-      }
-
-      const kindByN = new Map(schedule.map((s) => [s.n, s.kind]));
-      const monthsPaid = installments.filter((it) => isMensualidadKind(kindByN.get(it.n))).length;
-      const totalPaid = installments.reduce((s, r) => s + Number(r.amount || 0), 0);
-
-      const { error: prErr } = await sb.from("payments_report").upsert({
-        client_id: client.id,
-        vendor_id: profile.id,
-        months_paid: monthsPaid,
-        total_amount: totalPaid,
-        installments,
-      }, { onConflict: "client_id" });
-      if (prErr) throw prErr;
-
-      if (report) {
-        report.installments = installments;
-        report.months_paid = monthsPaid;
-        report.total_amount = totalPaid;
-      }
-
-      paint();
-      toast("Guardado.", "success", 1500);
-    } catch (e) {
-      toast(e.message || String(e), "error");
-      paint();
-    } finally {
-      saving = false;
-    }
-  }
-
-  input.addEventListener("blur", () => {
-    const raw = input.value.replace(/[^\d.\-]/g, "");
-    const next = raw === "" ? null : Number(raw);
-    const cleaned = Number.isFinite(next) ? next : null;
-    if ((client[field] ?? null) === (cleaned ?? null)) { paint(); return; }
-    save(cleaned, select.value);
-  });
-
-  select.addEventListener("change", () => {
-    const v = Number(client[field] || 0);
-    save(v > 0 ? v : null, select.value);
-  });
-
-  input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
-    if (ev.key === "Escape") { paint(); input.blur(); }
-  });
-
-  wrap.append(input, select);
-  return wrap;
-}
-
-function paintRowStatus(el, paid, expected, client) {
-  if (!expected) { el.className = "badge pending"; el.textContent = "—"; return; }
-  if (paid >= expected) { el.className = "badge ok"; el.textContent = "Completo"; return; }
-  if (paid > 0) { el.className = "badge partial"; el.textContent = "Parcial"; return; }
-  if (isFutureDue(client?.due_date)) { el.className = "badge partial"; el.textContent = "Pte por vencer"; return; }
-  el.className = "badge pending"; el.textContent = "Pendiente";
-}
-
-// Muestra due_date en formato local; cae a payment_month para datos legacy.
-function displayDueDate(client) {
-  if (client.due_date) {
-    const dt = new Date(client.due_date + "T00:00:00");
-    if (!isNaN(dt)) return dt.toLocaleDateString("es-MX");
-  }
-  return client.payment_month || "—";
-}
-
-function isFutureDue(due_date) {
-  if (!due_date) return false;
-  const dt = new Date(due_date + "T00:00:00");
-  if (isNaN(dt)) return false;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return dt > today;
-}
-
-// === Schedule por método ====================================================
-
-// Devuelve [{n, kind, label, expected_amount}] segun el metodo del cliente.
-// `kind` distingue qué cuenta como mensualidad ("mensualidad" | "final") vs
-// pagos a capital que no se difieren ("enganche" | "anticipo").
-//
-// Cronología real:
-//   1. Cliente firma contrato y, opcionalmente, paga anticipo.
-//   2. Día de instalación: paga enganche (cuando aplica).
-//   3. Lo restante (total − enganche − anticipo) se difiere en N
-//      mensualidades, donde N depende del método.
-function buildSchedule(client) {
-  const total    = Number(client.amount   || 0);
-  const enganche = Number(client.enganche || 0);
-  const anticipo = Number(client.anticipo || 0);
-  const method   = client.payment_method || "";
-
-  if (method.startsWith("Contado Parcial-")) {
-    if (enganche > 0 || anticipo > 0) {
-      const out = [];
-      if (anticipo > 0) out.push({ n: -2, kind: "anticipo", label: "Anticipo", expected_amount: anticipo });
-      if (enganche > 0) out.push({ n: 0,  kind: "enganche", label: "Enganche", expected_amount: enganche });
-      out.push({ n: 1, kind: "final", label: "Mensualidad final", expected_amount: +(total - enganche - anticipo).toFixed(2) });
-      return out;
-    }
-    const eng = +(total * 0.5).toFixed(2);
-    return [
-      { n: 0, kind: "enganche", label: "Enganche (50%)",    expected_amount: eng },
-      { n: 1, kind: "final",    label: "Mensualidad final", expected_amount: +(total - eng).toFixed(2) },
-    ];
-  }
-
-  const msi = method.match(/^(\d+) Meses Sin Intereses$/) || method.match(/(\d+) MSI$/);
-  if (msi) {
-    const n = parseInt(msi[1], 10);
-    const mensualidad = +((total - enganche - anticipo) / n).toFixed(2);
-    const out = [];
-    if (anticipo > 0) out.push({ n: -2, kind: "anticipo", label: "Anticipo", expected_amount: anticipo });
-    if (enganche > 0) out.push({ n: -1, kind: "enganche", label: "Enganche", expected_amount: enganche });
-    for (let i = 1; i <= n; i++) {
-      out.push({ n: i, kind: "mensualidad", label: `Mensualidad ${i} de ${n}`, expected_amount: mensualidad });
-    }
-    return out;
-  }
-
-  // Anticipo Mejoravit / Financiamiento / fallback
-  if (enganche === 0 && anticipo === 0) {
-    return [{ n: 1, kind: "final", label: "Plan personalizado", expected_amount: total }];
-  }
-  const out = [];
-  if (anticipo > 0) out.push({ n: -2, kind: "anticipo", label: "Anticipo", expected_amount: anticipo });
-  if (enganche > 0) out.push({ n: -1, kind: "enganche", label: "Enganche", expected_amount: enganche });
-  out.push({ n: 1, kind: "final", label: "Restante", expected_amount: +(total - enganche - anticipo).toFixed(2) });
-  return out;
-}
-
-// Enganche y anticipo van directo a capital, no son mensualidades. Solo
-// "mensualidad" y "final" cuentan en el progreso "Pagadas / Total".
-function isMensualidadKind(kind) {
-  return kind === "mensualidad" || kind === "final";
-}
-
-function expectedInstallmentCount(client) {
-  return buildSchedule(client).filter((r) => isMensualidadKind(r.kind)).length;
-}
-
-// Cuenta cuántas mensualidades reales (no enganche / anticipo) ya están
-// pagadas, usando el schedule del cliente para clasificar los `n` guardados.
-// Para datos viejos sin `installments` cae al campo legado months_paid.
-function paidMensualidadCount(client, report) {
-  if (!report) return 0;
-  if (!Array.isArray(report.installments)) return Number(report.months_paid || 0);
-  const kindByN = new Map(buildSchedule(client).map((s) => [s.n, s.kind]));
-  return report.installments.filter((it) => isMensualidadKind(kindByN.get(it.n))).length;
-}
-
-// Importe diferido por mes para el método del cliente. Devuelve null si el
-// método no es a meses (no hay base para un "diferido").
-function deferredMonthly(client) {
-  const method = client.payment_method || "";
-  const msi = method.match(/^(\d+) Meses Sin Intereses$/) || method.match(/(\d+) MSI$/);
-  if (!msi) return null;
-  const n = parseInt(msi[1], 10);
-  if (!n) return null;
-  const total    = Number(client.amount   || 0);
-  const enganche = Number(client.enganche || 0);
-  const anticipo = Number(client.anticipo || 0);
-  return +((total - enganche - anticipo) / n).toFixed(2);
-}
-
-function fmtMoneyOrNA(n) {
-  const v = Number(n || 0);
-  return v ? fmtMoney(v) : "N/A";
-}
-
 // === Modal de detalle =======================================================
 
 function openClientDetail(client, report, profile, refresh) {
@@ -423,96 +209,108 @@ function openClientDetail(client, report, profile, refresh) {
   const modal = document.createElement("div");
   modal.className = "modal detail-modal";
 
-  // Header con info del cliente
+  // Título
   const h = document.createElement("h2");
   h.textContent = client.name;
   modal.appendChild(h);
 
-  const meta = document.createElement("div");
-  meta.className = "detail-meta";
-  const diferido = deferredMonthly(client);
-  meta.innerHTML = `
-    <div><span class="muted">Fecha de vencimiento</span><strong>${escapeHtml(displayDueDate(client))}</strong></div>
-    <div><span class="muted">Método</span><strong>${escapeHtml(client.payment_method || "—")}</strong></div>
-    <div><span class="muted">Total</span><strong>${client.amount != null ? fmtMoney(client.amount) : "—"}</strong></div>
-    <div><span class="muted">Enganche</span><strong>${fmtMoneyOrNA(client.enganche)}</strong></div>
-    <div><span class="muted">Anticipo</span><strong>${fmtMoneyOrNA(client.anticipo)}</strong></div>
-    <div><span class="muted">Restante diferido</span><strong>${diferido == null ? "N/A" : `${fmtMoney(diferido)} / mes`}</strong></div>
-  `;
-  modal.appendChild(meta);
-
-  // Stats (se actualizan en cada cambio)
+  // Stats (Total / Conciliado / Pte conciliar / Pagos)
   const summary = document.createElement("div");
   summary.className = "summary";
   modal.appendChild(summary);
 
-  // Tabla de mensualidades
+  // Sección informativa: método, enganche, anticipo, activo
+  const info = document.createElement("div");
+  info.className = "client-info-grid";
+  modal.appendChild(info);
+
+  // Pagos capturados header con botón Agregar fila
+  const payHead = document.createElement("div");
+  payHead.className = "pay-head";
+  const payTitle = document.createElement("h3");
+  payTitle.textContent = "Pagos capturados";
+  payTitle.className = "pay-title";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "ghost";
+  addBtn.textContent = "+ Agregar fila";
+  payHead.append(payTitle, addBtn);
+  modal.appendChild(payHead);
+
+  // Tabla de filas capturadas
   const wrap = document.createElement("div");
   wrap.className = "table-wrap detail-schedule";
   const table = document.createElement("table");
   table.innerHTML = `
     <thead><tr>
-      <th>Mensualidad</th>
+      <th>#</th>
       <th>Monto</th>
       <th>Forma de pago</th>
       <th>Fecha de pago</th>
       <th>Status</th>
+      <th></th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
   table.appendChild(tbody);
   wrap.appendChild(table);
 
-  // Barra de paginacion (solo se muestra si hay >5 mensualidades)
   const pagBar = document.createElement("div");
   pagBar.className = "pagination-bar";
   modal.appendChild(pagBar);
   modal.appendChild(wrap);
 
-  // Estado en memoria de las mensualidades
-  const schedule = buildSchedule(client);
-  const saved = indexInstallments(report?.installments);
-  const rows = schedule.map((item) => ({
-    n: item.n,
-    kind: item.kind,
-    label: item.label,
-    expected: item.expected_amount,
-    amount: saved.get(item.n)?.amount ?? null,
-    form:   saved.get(item.n)?.form   ?? "",
-    date:   saved.get(item.n)?.date   ?? "",
-  }));
+  // Estado en memoria: cada fila tiene un id local estable para borrarla
+  const rows = (Array.isArray(report?.installments) ? report.installments : [])
+    .map((it, i) => ({
+      id: localId(),
+      n: typeof it.n === "number" ? it.n : i + 1,
+      amount: it.amount ?? null,
+      form:   it.form   ?? "",
+      date:   it.date   ?? "",
+    }));
 
   function refreshSummary() {
     const paidRows = rows.filter(isPaidRow);
-    const mensualidadRows = rows.filter((r) => isMensualidadKind(r.kind));
-    const monthsPaid = paidRows.filter((r) => isMensualidadKind(r.kind)).length;
     const totalPaid = paidRows.reduce((s, r) => s + Number(r.amount || 0), 0);
     const totalContract = Number(client.amount || 0);
     clear(summary);
     summary.append(
-      stat("Total contratado", fmtMoney(totalContract)),
-      stat("Pagado a la fecha", fmtMoney(totalPaid)),
+      stat("Monto contratado", fmtMoney(totalContract)),
+      stat("Conciliado", fmtMoney(totalPaid)),
       stat("Pte conciliar", fmtMoney(Math.max(0, totalContract - totalPaid)), "danger"),
-      stat("Mensualidades", `${monthsPaid} / ${mensualidadRows.length}`),
+      stat("Pagos", String(paidRows.length)),
     );
   }
 
   async function persist() {
+    // Renumerar n sequencial al guardar (la fila eliminada deja huecos).
+    rows.forEach((r, i) => { r.n = i + 1; });
     const installments = rows
       .filter(isPaidRow)
       .map((r) => ({ n: r.n, amount: Number(r.amount), form: r.form, date: r.date }));
-    const monthsPaid = rows.filter((r) => isPaidRow(r) && isMensualidadKind(r.kind)).length;
     const totalPaid = installments.reduce((s, r) => s + Number(r.amount || 0), 0);
 
     return sb.from("payments_report").upsert({
       client_id: client.id,
       vendor_id: profile.id,
-      months_paid: monthsPaid,
+      months_paid: installments.length,
       total_amount: totalPaid,
       installments,
     }, { onConflict: "client_id" });
   }
 
-  // === Paginacion ============================================================
+  paintInfo();
+  function paintInfo() {
+    clear(info);
+    info.append(
+      methodPicker(client),
+      moneyEditorBlock("Enganche (opc)", client, "enganche"),
+      moneyEditorBlock("Anticipo (opc)", client, "anticipo"),
+      activeToggle(client),
+    );
+  }
+
+  // Pagos: paginación
   const PAGE_SIZES = [5, 10, 25, 50];
   let pageSize = 10;
   let currentPage = 1;
@@ -547,24 +345,20 @@ function openClientDetail(client, report, profile, refresh) {
     pagBar.appendChild(spacer);
 
     const prev = document.createElement("button");
-    prev.type = "button";
-    prev.className = "ghost";
-    prev.textContent = "‹";
+    prev.type = "button"; prev.className = "ghost"; prev.textContent = "‹";
     prev.disabled = currentPage <= 1;
     prev.onclick = () => { currentPage--; renderPage(); };
 
-    const info = document.createElement("span");
-    info.className = "muted page-info";
-    info.textContent = `Página ${currentPage} de ${totalPages()}`;
+    const infoSp = document.createElement("span");
+    infoSp.className = "muted page-info";
+    infoSp.textContent = `Página ${currentPage} de ${totalPages()}`;
 
     const next = document.createElement("button");
-    next.type = "button";
-    next.className = "ghost";
-    next.textContent = "›";
+    next.type = "button"; next.className = "ghost"; next.textContent = "›";
     next.disabled = currentPage >= totalPages();
     next.onclick = () => { currentPage++; renderPage(); };
 
-    pagBar.append(prev, info, next);
+    pagBar.append(prev, infoSp, next);
   }
 
   function renderPage() {
@@ -575,11 +369,130 @@ function openClientDetail(client, report, profile, refresh) {
     const end   = pageSize === Infinity ? rows.length : start + pageSize;
 
     clear(tbody);
-    for (const r of rows.slice(start, end)) {
-      tbody.appendChild(buildScheduleRow(r, refreshSummary, persist));
+    if (rows.length === 0) {
+      const empty = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.className = "muted center";
+      td.style.textAlign = "center";
+      td.textContent = "Sin pagos capturados. Click en + Agregar fila.";
+      empty.appendChild(td);
+      tbody.appendChild(empty);
+    } else {
+      rows.slice(start, end).forEach((r, i) => {
+        tbody.appendChild(buildRow(r, start + i + 1));
+      });
     }
     paintPagination();
   }
+
+  function buildRow(r, displayIdx) {
+    const tr = document.createElement("tr");
+
+    const tdIdx = document.createElement("td");
+    tdIdx.textContent = String(displayIdx);
+
+    const tdAmount = document.createElement("td");
+    const amountInput = document.createElement("input");
+    amountInput.type = "text";
+    amountInput.inputMode = "decimal";
+    amountInput.placeholder = "$0.00";
+    tdAmount.appendChild(amountInput);
+
+    const tdForm = document.createElement("td");
+    const formSelect = document.createElement("select");
+    formSelect.appendChild(opt("", "—"));
+    for (const f of PAYMENT_FORMS) formSelect.appendChild(opt(f, f));
+    formSelect.value = r.form || "";
+    tdForm.appendChild(formSelect);
+
+    const tdDate = document.createElement("td");
+    const dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.value = r.date || "";
+    tdDate.appendChild(dateInput);
+
+    const tdStatus = document.createElement("td");
+    const badge = document.createElement("span");
+    tdStatus.appendChild(badge);
+
+    const tdDel = document.createElement("td");
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "icon-danger";
+    delBtn.title = "Borrar fila";
+    delBtn.textContent = "✕";
+    tdDel.appendChild(delBtn);
+
+    function paintAmount() {
+      if (r.amount != null && r.amount !== "") amountInput.value = fmtMoney(Number(r.amount));
+      else amountInput.value = "";
+    }
+    function paintBadge() {
+      if (isPaidRow(r)) { badge.className = "badge ok"; badge.textContent = "Pagado"; }
+      else if ((r.amount != null && r.amount !== "") || r.form || r.date) {
+        badge.className = "badge partial"; badge.textContent = "Incompleto";
+      } else {
+        badge.className = "badge pending"; badge.textContent = "Vacío";
+      }
+    }
+    paintAmount();
+    paintBadge();
+
+    let pendingSave = false;
+    async function save() {
+      if (pendingSave) return;
+      pendingSave = true;
+      const { error } = await persist();
+      pendingSave = false;
+      if (error) toast(error.message, "error");
+    }
+
+    function commit() {
+      const raw = amountInput.value.replace(/[^\d.\-]/g, "");
+      r.amount = raw === "" ? null : Number(raw);
+      if (!Number.isFinite(r.amount)) r.amount = null;
+      r.form = formSelect.value;
+      r.date = dateInput.value;
+      paintAmount();
+      paintBadge();
+      refreshSummary();
+      save();
+    }
+
+    amountInput.addEventListener("focus", () => {
+      if (r.amount != null) amountInput.value = String(r.amount);
+      else amountInput.value = "";
+      setTimeout(() => amountInput.select(), 0);
+    });
+    amountInput.addEventListener("blur", commit);
+    amountInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); amountInput.blur(); }
+    });
+    formSelect.addEventListener("change", commit);
+    dateInput.addEventListener("change", commit);
+
+    delBtn.addEventListener("click", async () => {
+      const idx = rows.findIndex((x) => x.id === r.id);
+      if (idx === -1) return;
+      rows.splice(idx, 1);
+      if (currentPage > totalPages()) currentPage = totalPages();
+      renderPage();
+      refreshSummary();
+      const { error } = await persist();
+      if (error) toast(error.message, "error");
+    });
+
+    tr.append(tdIdx, tdAmount, tdForm, tdDate, tdStatus, tdDel);
+    return tr;
+  }
+
+  addBtn.addEventListener("click", () => {
+    rows.push({ id: localId(), n: rows.length + 1, amount: null, form: "", date: "" });
+    if (pageSize !== Infinity) currentPage = totalPages();
+    renderPage();
+    refreshSummary();
+  });
 
   renderPage();
   refreshSummary();
@@ -602,132 +515,134 @@ function openClientDetail(client, report, profile, refresh) {
   });
 }
 
-function indexInstallments(arr) {
-  const m = new Map();
-  if (Array.isArray(arr)) {
-    for (const it of arr) {
-      if (it && typeof it.n === "number") m.set(it.n, it);
+// Editor inline para método de pago (informativo, no afecta cálculos).
+function methodPicker(client) {
+  const wrap = document.createElement("label");
+  wrap.className = "info-field";
+  const span = document.createElement("span");
+  span.textContent = "Método de pago";
+  span.className = "info-label";
+  const select = document.createElement("select");
+  select.appendChild(opt("", "—"));
+  // Opción legacy para no romper datos viejos fuera del catálogo nuevo.
+  const current = client.payment_method || "";
+  const inCatalog = METHODS.includes(current);
+  for (const m of METHODS) select.appendChild(opt(m, m));
+  if (current && !inCatalog) select.appendChild(opt(current, current + " (legacy)"));
+  select.value = current;
+
+  let saving = false;
+  select.addEventListener("change", async () => {
+    if (saving) return;
+    saving = true;
+    const next = select.value || null;
+    const { error } = await sb.from("clients").update({ payment_method: next }).eq("id", client.id);
+    saving = false;
+    if (error) { toast(error.message, "error"); select.value = client.payment_method || ""; return; }
+    client.payment_method = next;
+    toast("Método actualizado.", "success", 1500);
+  });
+
+  wrap.append(span, select);
+  return wrap;
+}
+
+// Bloque editable para enganche / anticipo (informativo, no afecta cálculo).
+function moneyEditorBlock(label, client, field) {
+  const wrap = document.createElement("label");
+  wrap.className = "info-field";
+  const span = document.createElement("span");
+  span.textContent = label;
+  span.className = "info-label";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.inputMode = "decimal";
+  input.placeholder = "—";
+  input.className = "money-editor";
+
+  function paint() {
+    const v = Number(client[field] || 0);
+    input.value = v ? fmtMoney(v) : "";
+  }
+  paint();
+
+  input.addEventListener("focus", () => {
+    const v = Number(client[field] || 0);
+    input.value = v ? String(v) : "";
+    setTimeout(() => input.select(), 0);
+  });
+
+  let saving = false;
+  input.addEventListener("blur", async () => {
+    if (saving) return;
+    const raw = input.value.replace(/[^\d.\-]/g, "");
+    const next = raw === "" ? null : Number(raw);
+    const cleaned = Number.isFinite(next) ? next : null;
+    if ((client[field] ?? null) === (cleaned ?? null)) { paint(); return; }
+
+    saving = true;
+    const { error } = await sb.from("clients").update({ [field]: cleaned }).eq("id", client.id);
+    saving = false;
+    if (error) { toast(error.message, "error"); paint(); return; }
+    client[field] = cleaned;
+    paint();
+    toast("Guardado.", "success", 1500);
+  });
+
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+    if (ev.key === "Escape") { paint(); input.blur(); }
+  });
+
+  wrap.append(span, input);
+  return wrap;
+}
+
+// Botón toggle "Marcar activo / Desmarcar activo".
+function activeToggle(client) {
+  const wrap = document.createElement("div");
+  wrap.className = "info-field info-field-action";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+
+  function paint() {
+    if (client.is_active) {
+      btn.className = "ghost active-on";
+      btn.textContent = "✓ Activo (click para desmarcar)";
+    } else {
+      btn.className = "";
+      btn.textContent = "Marcar como activo";
     }
   }
-  return m;
+  paint();
+
+  let saving = false;
+  btn.addEventListener("click", async () => {
+    if (saving) return;
+    saving = true;
+    const next = !client.is_active;
+    const { error } = await sb.from("clients").update({ is_active: next }).eq("id", client.id);
+    saving = false;
+    if (error) { toast(error.message, "error"); return; }
+    client.is_active = next;
+    paint();
+    toast(next ? "Cliente marcado como activo." : "Activo desmarcado.", "success", 1500);
+  });
+
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 function isPaidRow(r) {
-  if (r.amount == null || r.amount === "" || !r.form) return false;
-  // Enganche y anticipo no requieren fecha (van directo a capital).
-  if (r.kind === "enganche" || r.kind === "anticipo") return true;
-  return !!r.date;
+  return r.amount != null && r.amount !== "" && Number(r.amount) > 0 && !!r.form && !!r.date;
 }
 
-function buildScheduleRow(r, refreshSummary, persist) {
-  const tr = document.createElement("tr");
-
-  const tdLabel = document.createElement("td");
-  tdLabel.textContent = r.label;
-
-  // Monto: input texto que muestra "$15,000.00" en blur y el numero crudo
-  // en focus (para editar). Mantiene inputMode=decimal para teclado numerico.
-  const tdAmount = document.createElement("td");
-  const amountInput = document.createElement("input");
-  amountInput.type = "text";
-  amountInput.inputMode = "decimal";
-  amountInput.placeholder = fmtMoney(r.expected);
-  tdAmount.appendChild(amountInput);
-
-  const tdForm = document.createElement("td");
-  const formSelect = document.createElement("select");
-  formSelect.appendChild(opt("", "—"));
-  for (const f of PAYMENT_FORMS) formSelect.appendChild(opt(f, f));
-  formSelect.value = r.form || "";
-  tdForm.appendChild(formSelect);
-
-  const tdDate = document.createElement("td");
-  // Enganche y anticipo no llevan fecha (van directo a capital).
-  const isExtra = r.kind === "enganche" || r.kind === "anticipo";
-  let dateInput = null;
-  if (isExtra) {
-    tdDate.textContent = "—";
-    tdDate.className = "muted";
-  } else {
-    dateInput = document.createElement("input");
-    dateInput.type = "date";
-    dateInput.value = r.date || "";
-    tdDate.appendChild(dateInput);
-  }
-
-  const tdStatus = document.createElement("td");
-  const badge = document.createElement("span");
-  tdStatus.appendChild(badge);
-
-  function paintAmount() {
-    if (r.amount != null && r.amount !== "") amountInput.value = fmtMoney(Number(r.amount));
-    else amountInput.value = "";
-  }
-
-  function paintBadge() {
-    if (isPaidRow(r)) { badge.className = "badge ok"; badge.textContent = "Pagado"; }
-    else if ((r.amount != null && r.amount !== "") || r.form || r.date) {
-      badge.className = "badge partial"; badge.textContent = "Incompleto";
-    } else {
-      badge.className = "badge pending"; badge.textContent = "Pendiente";
-    }
-  }
-  paintAmount();
-  paintBadge();
-
-  let pendingSave = false;
-  async function save() {
-    if (pendingSave) return;
-    pendingSave = true;
-    const { error } = await persist();
-    pendingSave = false;
-    if (error) toast(error.message, "error");
-  }
-
-  function commit() {
-    // Parsear el monto del display (puede traer "$" y comas)
-    const raw = amountInput.value.replace(/[^\d.\-]/g, "");
-    r.amount = raw === "" ? null : Number(raw);
-    if (!Number.isFinite(r.amount)) r.amount = null;
-    r.form = formSelect.value;
-    r.date = dateInput ? dateInput.value : "";
-
-    // Si llena forma (y fecha cuando aplica) pero el monto sigue vacio,
-    // asume el esperado.
-    const formAndDateOk = isExtra ? !!r.form : (r.form && r.date);
-    if (formAndDateOk && (r.amount == null)) {
-      r.amount = r.expected;
-    }
-
-    paintAmount();
-    paintBadge();
-    refreshSummary();
-    save();
-  }
-
-  amountInput.addEventListener("focus", () => {
-    if (r.amount != null) amountInput.value = String(r.amount);
-    else amountInput.value = "";
-    setTimeout(() => amountInput.select(), 0);
-  });
-  amountInput.addEventListener("blur", commit);
-  amountInput.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") { ev.preventDefault(); amountInput.blur(); }
-  });
-  formSelect.addEventListener("change", commit);
-  if (dateInput) dateInput.addEventListener("change", commit);
-
-  tr.append(tdLabel, tdAmount, tdForm, tdDate, tdStatus);
-  return tr;
+function localId() {
+  return `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function opt(value, label) {
   const o = document.createElement("option");
   o.value = value; o.textContent = label; return o;
-}
-
-function escapeHtml(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
