@@ -48,6 +48,7 @@ create table if not exists public.clients (
   enganche       numeric(12,2),
   anticipo       numeric(12,2),
   notes          text,
+  due_date       date,
   created_at     timestamptz not null default now()
 );
 
@@ -58,6 +59,7 @@ alter table public.clients add column if not exists amount         numeric(12,2)
 alter table public.clients add column if not exists enganche       numeric(12,2);
 alter table public.clients add column if not exists anticipo       numeric(12,2);
 alter table public.clients add column if not exists notes          text;
+alter table public.clients add column if not exists due_date       date;
 
 create index if not exists clients_vendor_idx on public.clients(vendor_id);
 create index if not exists clients_zone_idx   on public.clients(zone);

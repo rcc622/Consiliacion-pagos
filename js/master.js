@@ -5,10 +5,6 @@ import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
 import { parseFile, importRows } from "./import.js";
 import { exportConciliation } from "./export.js";
 
-const MONTHS = [
-  "Enero","Febrero","Marzo","Abril","Mayo","Junio",
-  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
-];
 const ZONES = [
   "Monterrey","Saltillo","Chihuahua","MTY Foraneo","FORANEO","COMERCIAL MTY",
 ];
@@ -123,7 +119,7 @@ function buildToolbar(refresh) {
 async function loadAll() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date"),
     sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -257,7 +253,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   tableEl.innerHTML = `
     <thead><tr>
       <th class="check-col"><input type="checkbox" data-role="select-all" /></th>
-      <th>Cliente</th><th>Mes</th><th>Zona</th><th>Vendedor</th>
+      <th>Cliente</th><th>Fecha de vencimiento</th><th>Vendedor</th>
       <th>Método de pago</th><th>Monto</th>
       <th>Enganche</th><th>Anticipo</th><th>Diferido / mes</th>
       <th># Mens. reportadas</th><th>Monto reportado</th><th>Estado</th>
@@ -311,10 +307,10 @@ function paintDetail(container, vendors, clients, reports, refresh) {
 
     // Resto de columnas
     const dif = deferredMonthly(c);
+    const status = clientStatus(c, reported);
     const fixedHtml = `
       <td>${escapeHtml(c.name)}</td>
-      <td>${escapeHtml(c.payment_month || "—")}</td>
-      <td>${escapeHtml(c.zone || "—")}</td>
+      <td>${escapeHtml(displayDueDate(c))}</td>
       <td>${escapeHtml(v ? (v.full_name || v.email) : "—")}</td>
       <td>${escapeHtml(c.payment_method || "—")}</td>
       <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
@@ -323,7 +319,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       <td>${dif == null ? "N/A" : fmtMoney(dif)}</td>
       <td>${r?.months_paid ?? "—"}</td>
       <td>${r?.total_amount != null ? fmtMoney(r.total_amount) : "—"}</td>
-      <td><span class="badge ${reported ? "ok" : "pending"}">${reported ? "Reportado" : "Pendiente"}</span></td>
+      <td><span class="badge ${status.cls}">${status.label}</span></td>
       <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
     const tmpl = document.createElement("template");
     tmpl.innerHTML = fixedHtml.trim();
@@ -371,10 +367,7 @@ async function editClientFlow(client, vendors, refresh) {
     submitLabel: "Guardar",
     fields: [
       { name: "name", label: "Nombre del cliente", type: "text", required: true, value: client.name || "" },
-      {
-        name: "payment_month", label: "Mes", type: "select", value: client.payment_month || "",
-        options: [{ value: "", label: "—" }, ...MONTHS.map((m) => ({ value: m, label: m }))],
-      },
+      { name: "due_date", label: "Fecha de vencimiento", type: "date", value: client.due_date || "" },
       {
         name: "zone", label: "Zona", type: "select", value: client.zone || "",
         options: catalogOptions(ZONES, client.zone),
@@ -398,7 +391,7 @@ async function editClientFlow(client, vendors, refresh) {
     name: data.name,
     zone: data.zone || null,
     vendor_id: data.vendor_id,
-    payment_month:  data.payment_month  || null,
+    due_date: data.due_date || null,
     payment_method: data.payment_method || null,
     amount:   data.amount   === "" ? null : Number(data.amount),
     enganche: data.enganche === "" ? null : Number(data.enganche),
@@ -708,10 +701,7 @@ async function addClientFlow(refresh) {
     submitLabel: "Crear",
     fields: [
       { name: "name", label: "Nombre del cliente", type: "text", required: true },
-      {
-        name: "payment_month", label: "Mes", type: "select",
-        options: [{ value: "", label: "—" }, ...MONTHS.map((m) => ({ value: m, label: m }))],
-      },
+      { name: "due_date", label: "Fecha de vencimiento", type: "date" },
       {
         name: "zone", label: "Zona", type: "select",
         options: catalogOptions(ZONES, ""),
@@ -735,7 +725,7 @@ async function addClientFlow(refresh) {
     name: data.name,
     zone: data.zone || null,
     vendor_id: data.vendor_id,
-    payment_month:  data.payment_month  || null,
+    due_date: data.due_date || null,
     payment_method: data.payment_method || null,
     amount:   data.amount   === "" ? null : Number(data.amount),
     enganche: data.enganche === "" ? null : Number(data.enganche),
@@ -764,4 +754,28 @@ function deferredMonthly(client) {
   const n = parseInt(msi[1], 10);
   if (!n) return null;
   return +((Number(client.amount || 0) - Number(client.enganche || 0) - Number(client.anticipo || 0)) / n).toFixed(2);
+}
+
+// Muestra due_date en formato local; cae a payment_month para datos legacy.
+function displayDueDate(client) {
+  if (client.due_date) {
+    const dt = new Date(client.due_date + "T00:00:00");
+    if (!isNaN(dt)) return dt.toLocaleDateString("es-MX");
+  }
+  return client.payment_month || "—";
+}
+
+function isFutureDue(due_date) {
+  if (!due_date) return false;
+  const dt = new Date(due_date + "T00:00:00");
+  if (isNaN(dt)) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return dt > today;
+}
+
+// Reportado > Pte por vencer (futuro y sin captura) > Pendiente.
+function clientStatus(client, reported) {
+  if (reported) return { cls: "ok", label: "Reportado" };
+  if (isFutureDue(client.due_date)) return { cls: "partial", label: "Pte por vencer" };
+  return { cls: "pending", label: "Pendiente" };
 }

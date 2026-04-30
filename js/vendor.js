@@ -36,7 +36,7 @@ function headerNode(profile) {
 
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
-    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount, enganche, anticipo, notes").order("name"),
+    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount, enganche, anticipo, notes, due_date").order("name"),
     sb.from("payments_report").select("client_id, months_paid, total_amount, installments, updated_at"),
   ]);
 
@@ -83,8 +83,7 @@ function paintTable(container, clients, reports, profile, refresh) {
   thead.innerHTML = `
     <tr>
       <th>Cliente</th>
-      <th>Mes</th>
-      <th>Zona</th>
+      <th>Fecha de vencimiento</th>
       <th>Método de pago</th>
       <th>Monto</th>
       <th>Enganche</th>
@@ -116,8 +115,7 @@ function rowFor(client, report, profile, refresh) {
   link.onclick = (ev) => { ev.preventDefault(); openClientDetail(client, report, profile, refresh); };
   tdName.appendChild(link);
 
-  const tdMonth   = document.createElement("td"); tdMonth.textContent   = client.payment_month  || "—";
-  const tdZone    = document.createElement("td"); tdZone.textContent    = client.zone           || "—";
+  const tdDue     = document.createElement("td"); tdDue.textContent     = displayDueDate(client);
   const tdMethod  = document.createElement("td"); tdMethod.textContent  = client.payment_method || "—";
   const tdAmount  = document.createElement("td"); tdAmount.textContent  = client.amount != null ? fmtMoney(client.amount) : "—";
 
@@ -137,13 +135,13 @@ function rowFor(client, report, profile, refresh) {
 
   const tdStatus = document.createElement("td");
   const badge = document.createElement("span");
-  paintRowStatus(badge, paid, expected);
+  paintRowStatus(badge, paid, expected, client);
   tdStatus.appendChild(badge);
 
   const tdNotes = document.createElement("td");
   tdNotes.appendChild(notesEditor(client));
 
-  tr.append(tdName, tdMonth, tdZone, tdMethod, tdAmount, tdEnganche, tdAnticipo, tdProgress, tdCobrado, tdStatus, tdNotes);
+  tr.append(tdName, tdDue, tdMethod, tdAmount, tdEnganche, tdAnticipo, tdProgress, tdCobrado, tdStatus, tdNotes);
   return tr;
 }
 
@@ -296,11 +294,29 @@ function engancheAnticipoEditor(client, report, profile, field, refresh) {
   return wrap;
 }
 
-function paintRowStatus(el, paid, expected) {
+function paintRowStatus(el, paid, expected, client) {
   if (!expected) { el.className = "badge pending"; el.textContent = "—"; return; }
   if (paid >= expected) { el.className = "badge ok"; el.textContent = "Completo"; return; }
   if (paid > 0) { el.className = "badge partial"; el.textContent = "Parcial"; return; }
+  if (isFutureDue(client?.due_date)) { el.className = "badge partial"; el.textContent = "Pte por vencer"; return; }
   el.className = "badge pending"; el.textContent = "Pendiente";
+}
+
+// Muestra due_date en formato local; cae a payment_month para datos legacy.
+function displayDueDate(client) {
+  if (client.due_date) {
+    const dt = new Date(client.due_date + "T00:00:00");
+    if (!isNaN(dt)) return dt.toLocaleDateString("es-MX");
+  }
+  return client.payment_month || "—";
+}
+
+function isFutureDue(due_date) {
+  if (!due_date) return false;
+  const dt = new Date(due_date + "T00:00:00");
+  if (isNaN(dt)) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return dt > today;
 }
 
 // === Schedule por método ====================================================
@@ -416,8 +432,7 @@ function openClientDetail(client, report, profile, refresh) {
   meta.className = "detail-meta";
   const diferido = deferredMonthly(client);
   meta.innerHTML = `
-    <div><span class="muted">Zona</span><strong>${escapeHtml(client.zone || "—")}</strong></div>
-    <div><span class="muted">Mes</span><strong>${escapeHtml(client.payment_month || "—")}</strong></div>
+    <div><span class="muted">Fecha de vencimiento</span><strong>${escapeHtml(displayDueDate(client))}</strong></div>
     <div><span class="muted">Método</span><strong>${escapeHtml(client.payment_method || "—")}</strong></div>
     <div><span class="muted">Total</span><strong>${client.amount != null ? fmtMoney(client.amount) : "—"}</strong></div>
     <div><span class="muted">Enganche</span><strong>${fmtMoneyOrNA(client.enganche)}</strong></div>
