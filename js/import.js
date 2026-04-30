@@ -1,8 +1,17 @@
-// Parseo CSV/Excel via SheetJS y upsert masivo en clients.
+// Parseo CSV/Excel via SheetJS y upsert en clients.
+//
+// Soporta dos formatos:
+//
+// A) "deuda" (nuevo) — formato del archivo de cartera:
+//    Contacto | Fecha de vencimiento | Total en moneda firmado |
+//    Cantidad por pagar | Referencia
+//    Reglas: agrupar por Referencia (o Contacto si no hay), sumar
+//    Cantidad por pagar, skip si suma = 0, upsert por reference.
+//
+// B) "legacy" — formato original con vendedor_email y monto por fila.
 
 import { sb } from "./supabase.js";
 
-// Devuelve array de objetos {cliente, zona, vendedor_email, mes, metodo, monto}
 export async function parseFile(file) {
   if (!window.XLSX) throw new Error("SheetJS no está disponible.");
   const buf = await file.arrayBuffer();
@@ -11,10 +20,9 @@ export async function parseFile(file) {
   const wb  = window.XLSX.read(buf, { type: "array", codepage: 65001 });
   const ws  = wb.Sheets[wb.SheetNames[0]];
   const rows = window.XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
-  return rows.map(normalizeRow).filter((r) => r.cliente);
+  return rows.map(normalizeRow).filter((r) => r._hasContent);
 }
 
-// Normaliza un nombre de columna: minusculas, sin acentos/diéresis, sin espacios.
 function normalizeKey(k) {
   return String(k)
     .normalize("NFD")
@@ -29,8 +37,26 @@ function normalizeRow(row) {
   for (const k of Object.keys(row)) {
     out[normalizeKey(k)] = String(row[k]).trim();
   }
+
+  // Formato deuda: detecta presencia de "cantidad_por_pagar" o "referencia".
+  const hasDeudaCols = "cantidad_por_pagar" in out || "referencia" in out;
+  if (hasDeudaCols) {
+    const contacto = out.contacto || out.cliente || out.nombre || "";
+    return {
+      _format: "deuda",
+      _hasContent: !!contacto,
+      contacto,
+      cantidad: out.cantidad_por_pagar || "",
+      referencia: out.referencia || "",
+    };
+  }
+
+  // Formato legacy.
+  const cliente = out.cliente || out.nombre || out.client || "";
   return {
-    cliente: out.cliente || out.nombre || out.client || "",
+    _format: "legacy",
+    _hasContent: !!cliente,
+    cliente,
     zona:    out.zona    || out.zone   || "",
     vendedor_email: (out.vendedor_email || out.vendedor || out.email || "").trim().toLowerCase(),
     mes:      out.mes      || out.month   || "",
@@ -41,15 +67,109 @@ function normalizeRow(row) {
   };
 }
 
-// Inserta cada fila en clients haciendo lookup de vendor_id por email.
-// El lookup ignora mayusculas/minusculas y espacios, y trae a TODOS los
-// vendedores en una sola consulta para evitar problemas de casing en .in().
+function parseAmount(raw) {
+  if (raw === "" || raw == null) return null;
+  const n = Number(String(raw).replace(/[^0-9.\-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+// Punto de entrada. Retorna { inserted, updated, skipped, errors }.
 //
-// `defaults` permite forzar valores en bloque (sobrescriben el CSV):
-//   { vendor_id, zone, payment_month }
-//
-// Retorna { inserted, errors:[{row, reason}] }.
+// `defaults` viene del modal de import. Para formato deuda solo usa vendor_id.
 export async function importRows(rows, defaults = {}) {
+  if (!rows.length) return { inserted: 0, updated: 0, skipped: 0, errors: [] };
+  const isDeuda = rows[0]._format === "deuda";
+  return isDeuda ? importDeuda(rows, defaults) : importLegacy(rows, defaults);
+}
+
+// === Formato deuda ===
+//
+// Agrupa por Referencia (o Contacto si no hay), suma Cantidad por pagar,
+// crea/actualiza un cliente por grupo. Skip si la suma es 0.
+async function importDeuda(rows, defaults) {
+  const defaultVendor = defaults.vendor_id || null;
+  if (!defaultVendor) {
+    return {
+      inserted: 0, updated: 0, skipped: 0,
+      errors: [{ row: {}, reason: "Selecciona un vendedor en el modal antes de importar." }],
+    };
+  }
+
+  // 1) Agrupar.
+  const groups = new Map(); // key → { contacto, referencia, total }
+  for (const r of rows) {
+    const contacto = r.contacto.trim();
+    if (!contacto) continue;
+    const ref = r.referencia.trim();
+    const key = ref || `name:${contacto.toLowerCase()}`;
+    if (!groups.has(key)) {
+      groups.set(key, { contacto, referencia: ref || null, total: 0 });
+    }
+    const g = groups.get(key);
+    g.total += parseAmount(r.cantidad) || 0;
+  }
+
+  // 2) Filtrar grupos en cero.
+  const candidates = [];
+  let skipped = 0;
+  for (const g of groups.values()) {
+    if (g.total <= 0) { skipped++; continue; }
+    candidates.push({ ...g, total: +g.total.toFixed(2) });
+  }
+
+  // 3) Lookup de existentes por reference (en una sola query).
+  const refs = candidates.map((g) => g.referencia).filter(Boolean);
+  const existingByRef = new Map();
+  if (refs.length) {
+    const { data, error } = await sb.from("clients").select("id, reference").in("reference", refs);
+    if (error) throw error;
+    for (const c of data || []) existingByRef.set(c.reference, c.id);
+  }
+
+  // 4) Split: insert (nuevos) vs update (existentes con reference).
+  const toInsert = [];
+  const toUpdate = []; // [{ id, patch }]
+  for (const g of candidates) {
+    const existingId = g.referencia ? existingByRef.get(g.referencia) : null;
+    if (existingId) {
+      toUpdate.push({ id: existingId, patch: { name: g.contacto, amount: g.total } });
+    } else {
+      toInsert.push({
+        name: g.contacto,
+        reference: g.referencia,
+        vendor_id: defaultVendor,
+        amount: g.total,
+      });
+    }
+  }
+
+  const errors = [];
+  let inserted = 0;
+  let updated = 0;
+
+  if (toInsert.length) {
+    const { error, count } = await sb.from("clients").insert(toInsert, { count: "exact" });
+    if (error) {
+      errors.push({ row: {}, reason: `Insert falló: ${error.message}` });
+    } else {
+      inserted = count ?? toInsert.length;
+    }
+  }
+
+  for (const u of toUpdate) {
+    const { error } = await sb.from("clients").update(u.patch).eq("id", u.id);
+    if (error) {
+      errors.push({ row: u.patch, reason: `Update falló (${u.id}): ${error.message}` });
+    } else {
+      updated++;
+    }
+  }
+
+  return { inserted, updated, skipped, errors };
+}
+
+// === Formato legacy (compat) ===
+async function importLegacy(rows, defaults) {
   const defaultVendor = defaults.vendor_id || null;
   const defaultZone   = defaults.zone || null;
   const defaultMonth  = defaults.payment_month || null;
@@ -75,42 +195,32 @@ export async function importRows(rows, defaults = {}) {
         errors.push({ row: r, reason: "Sin vendedor (ni en CSV ni en selector)" });
         continue;
       }
-      const key = r.vendedor_email.trim().toLowerCase();
-      vid = vendorByEmail.get(key);
+      vid = vendorByEmail.get(r.vendedor_email);
       if (!vid) {
         errors.push({ row: r, reason: `Vendedor no encontrado: ${r.vendedor_email}` });
         continue;
       }
     }
-    const amount   = parseAmount(r.monto);
-    const enganche = parseAmount(r.enganche);
-    const anticipo = parseAmount(r.anticipo);
     toInsert.push({
       name: r.cliente,
       zone: defaultZone || r.zona || null,
       vendor_id: vid,
-      payment_month:  defaultMonth || r.mes    || null,
+      payment_month:  defaultMonth || r.mes || null,
       payment_method: r.metodo || null,
-      amount,
-      enganche,
-      anticipo,
+      amount:   parseAmount(r.monto),
+      enganche: parseAmount(r.enganche),
+      anticipo: parseAmount(r.anticipo),
     });
-  }
-
-  function parseAmount(raw) {
-    if (raw === "" || raw == null) return null;
-    const n = Number(String(raw).replace(/[^0-9.\-]/g, ""));
-    return Number.isFinite(n) ? n : null;
   }
 
   let inserted = 0;
   if (toInsert.length) {
-    const { error: insErr, count } = await sb
+    const { error, count } = await sb
       .from("clients")
       .insert(toInsert, { count: "exact" });
-    if (insErr) throw insErr;
+    if (error) throw error;
     inserted = count ?? toInsert.length;
   }
 
-  return { inserted, errors };
+  return { inserted, updated: 0, skipped: 0, errors };
 }

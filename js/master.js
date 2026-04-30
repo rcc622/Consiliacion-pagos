@@ -594,11 +594,16 @@ async function triggerImport(refresh) {
   try {
     const rows = await parseFile(params.file);
     if (!rows.length) { toast("El archivo no tiene filas válidas.", "error"); return; }
-    const { inserted, errors } = await importRows(rows, params.defaults);
-    toast(`Insertados: ${inserted}. Errores: ${errors.length}.`, errors.length ? "info" : "success");
+    const { inserted, updated, skipped, errors } = await importRows(rows, params.defaults);
+    const parts = [];
+    if (inserted) parts.push(`Insertados: ${inserted}`);
+    if (updated)  parts.push(`Actualizados: ${updated}`);
+    if (skipped)  parts.push(`Omitidos (suma 0): ${skipped}`);
+    if (errors.length) parts.push(`Errores: ${errors.length}`);
+    toast(parts.join(" · ") || "Sin cambios.", errors.length ? "info" : "success");
     if (errors.length) {
       for (const e of errors.slice(0, 5)) {
-        toast(`${e.row.cliente || "(sin nombre)"} → ${e.reason}`, "error", 5000);
+        toast(`${e.row.cliente || e.row.contacto || e.row.name || "(sin nombre)"} → ${e.reason}`, "error", 5000);
       }
     }
     refresh();
