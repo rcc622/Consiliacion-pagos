@@ -65,9 +65,9 @@ function isReportedAtAll(r) {
   return r && (r.months_paid > 0 || Number(r.total_amount) > 0);
 }
 
-function stat(label, value) {
+function stat(label, value, kind = "") {
   const el = document.createElement("div");
-  el.className = "stat";
+  el.className = `stat${kind ? ` stat-${kind}` : ""}`;
   const l = document.createElement("div"); l.className = "label"; l.textContent = label;
   const v = document.createElement("div"); v.className = "value"; v.textContent = value;
   el.append(l, v);
@@ -87,6 +87,8 @@ function paintTable(container, clients, reports, profile, refresh) {
       <th>Zona</th>
       <th>Método de pago</th>
       <th>Monto</th>
+      <th>Enganche</th>
+      <th>Anticipo</th>
       <th>Pagadas / Total</th>
       <th>Cobrado</th>
       <th>Estado</th>
@@ -118,6 +120,12 @@ function rowFor(client, report, profile, refresh) {
   const tdMethod  = document.createElement("td"); tdMethod.textContent  = client.payment_method || "—";
   const tdAmount  = document.createElement("td"); tdAmount.textContent  = client.amount != null ? fmtMoney(client.amount) : "—";
 
+  const tdEnganche = document.createElement("td");
+  tdEnganche.appendChild(moneyEditor(client, "enganche"));
+
+  const tdAnticipo = document.createElement("td");
+  tdAnticipo.appendChild(moneyEditor(client, "anticipo"));
+
   const expected = expectedInstallmentCount(client);
   const paid = Number(report?.months_paid || 0);
   const tdProgress = document.createElement("td");
@@ -131,8 +139,60 @@ function rowFor(client, report, profile, refresh) {
   paintRowStatus(badge, paid, expected);
   tdStatus.appendChild(badge);
 
-  tr.append(tdName, tdMonth, tdZone, tdMethod, tdAmount, tdProgress, tdCobrado, tdStatus);
+  tr.append(tdName, tdMonth, tdZone, tdMethod, tdAmount, tdEnganche, tdAnticipo, tdProgress, tdCobrado, tdStatus);
   return tr;
+}
+
+// Input inline para enganche/anticipo: muestra fmtMoney en blur, número crudo
+// en focus, "N/A" como placeholder cuando está vacío. Persiste el cambio en
+// public.clients via UPDATE (RLS: clients_vendor_update).
+function moneyEditor(client, field) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.inputMode = "decimal";
+  input.placeholder = "N/A";
+  input.className = "money-editor";
+
+  function paint() {
+    const v = Number(client[field] || 0);
+    input.value = v ? fmtMoney(v) : "";
+  }
+  paint();
+
+  input.addEventListener("focus", () => {
+    const v = Number(client[field] || 0);
+    input.value = v ? String(v) : "";
+    setTimeout(() => input.select(), 0);
+  });
+
+  let saving = false;
+  input.addEventListener("blur", async () => {
+    if (saving) return;
+    const raw = input.value.replace(/[^\d.\-]/g, "");
+    const next = raw === "" ? null : Number(raw);
+    const cleaned = Number.isFinite(next) ? next : null;
+    const prev = client[field] ?? null;
+    if ((prev ?? null) === (cleaned ?? null)) { paint(); return; }
+
+    saving = true;
+    const { error } = await sb.from("clients").update({ [field]: cleaned }).eq("id", client.id);
+    saving = false;
+    if (error) {
+      toast(error.message, "error");
+      paint();
+      return;
+    }
+    client[field] = cleaned;
+    paint();
+    toast("Guardado.", "success", 1500);
+  });
+
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+    if (ev.key === "Escape") { paint(); input.blur(); }
+  });
+
+  return input;
 }
 
 function paintRowStatus(el, paid, expected) {
@@ -291,7 +351,7 @@ function openClientDetail(client, report, profile, refresh) {
     summary.append(
       stat("Total contratado", fmtMoney(totalContract)),
       stat("Pagado a la fecha", fmtMoney(totalPaid)),
-      stat("Adeudo", fmtMoney(Math.max(0, totalContract - totalPaid))),
+      stat("Pte conciliar", fmtMoney(Math.max(0, totalContract - totalPaid)), "danger"),
       stat("Mensualidades", `${monthsPaid} / ${rows.length}`),
     );
   }

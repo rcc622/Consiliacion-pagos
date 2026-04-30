@@ -189,6 +189,7 @@ button.icon-btn {
 }
 .summary .stat .label { font-size: 12px; color: var(--muted); }
 .summary .stat .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+.summary .stat.stat-danger .value { color: var(--error); }
 
 .table-wrap {
   background: var(--surface);
@@ -214,6 +215,12 @@ tr:last-child td { border-bottom: 0; }
 td input[type="number"] {
   width: 110px;
   padding: 4px 8px;
+}
+
+td input.money-editor {
+  width: 110px;
+  padding: 4px 8px;
+  text-align: right;
 }
 
 .badge {

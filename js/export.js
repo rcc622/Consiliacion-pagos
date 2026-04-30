@@ -21,7 +21,7 @@ const COLUMNS = [
   "Restante diferido",
   "Mens. reportadas",
   "Monto reportado",
-  "Adeudo",
+  "Pte conciliar",
   "Estado",
 ];
 

@@ -148,7 +148,10 @@ create policy profiles_self_update on public.profiles
   for update using (id = auth.uid());
 
 -- clients: vendor solo ve los suyos; master lee y escribe todo.
+-- El vendor puede actualizar sus propios clientes (enganche, anticipo, etc.);
+-- el master sigue siendo dueño absoluto.
 drop policy if exists clients_vendor_select on public.clients;
+drop policy if exists clients_vendor_update on public.clients;
 drop policy if exists clients_master_all    on public.clients;
 
 create policy clients_vendor_select on public.clients
@@ -156,6 +159,10 @@ create policy clients_vendor_select on public.clients
     vendor_id = auth.uid()
     or public.current_user_role() = 'master'
   );
+
+create policy clients_vendor_update on public.clients
+  for update using (vendor_id = auth.uid())
+  with check (vendor_id = auth.uid());
 
 create policy clients_master_all on public.clients
   for all using (public.current_user_role() = 'master')
