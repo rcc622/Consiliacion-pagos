@@ -123,7 +123,7 @@ function buildToolbar(refresh) {
 async function loadAll() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes"),
     sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -261,6 +261,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       <th>Método de pago</th><th>Monto</th>
       <th>Enganche</th><th>Anticipo</th><th>Diferido / mes</th>
       <th># Mens. reportadas</th><th>Monto reportado</th><th>Estado</th>
+      <th>Notas</th>
       <th></th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
@@ -322,7 +323,8 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       <td>${dif == null ? "N/A" : fmtMoney(dif)}</td>
       <td>${r?.months_paid ?? "—"}</td>
       <td>${r?.total_amount != null ? fmtMoney(r.total_amount) : "—"}</td>
-      <td><span class="badge ${reported ? "ok" : "pending"}">${reported ? "Reportado" : "Pendiente"}</span></td>`;
+      <td><span class="badge ${reported ? "ok" : "pending"}">${reported ? "Reportado" : "Pendiente"}</span></td>
+      <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
     const tmpl = document.createElement("template");
     tmpl.innerHTML = fixedHtml.trim();
     while (tmpl.content.firstChild) tr.appendChild(tmpl.content.firstChild);

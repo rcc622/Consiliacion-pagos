@@ -36,7 +36,7 @@ function headerNode(profile) {
 
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
-    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount, enganche, anticipo").order("name"),
+    sb.from("clients").select("id, name, zone, payment_month, payment_method, amount, enganche, anticipo, notes").order("name"),
     sb.from("payments_report").select("client_id, months_paid, total_amount, installments, updated_at"),
   ]);
 
@@ -92,6 +92,7 @@ function paintTable(container, clients, reports, profile, refresh) {
       <th>Pagadas / Total</th>
       <th>Cobrado</th>
       <th>Estado</th>
+      <th>Notas</th>
     </tr>`;
   table.appendChild(thead);
 
@@ -139,8 +140,47 @@ function rowFor(client, report, profile, refresh) {
   paintRowStatus(badge, paid, expected);
   tdStatus.appendChild(badge);
 
-  tr.append(tdName, tdMonth, tdZone, tdMethod, tdAmount, tdEnganche, tdAnticipo, tdProgress, tdCobrado, tdStatus);
+  const tdNotes = document.createElement("td");
+  tdNotes.appendChild(notesEditor(client));
+
+  tr.append(tdName, tdMonth, tdZone, tdMethod, tdAmount, tdEnganche, tdAnticipo, tdProgress, tdCobrado, tdStatus, tdNotes);
   return tr;
+}
+
+// Textarea inline para notes. Persiste en clients.notes via UPDATE
+// (RLS clients_vendor_update permite que el vendedor escriba sus propios
+// clientes). Escape limpia y blur guardan.
+function notesEditor(client) {
+  const ta = document.createElement("textarea");
+  ta.className = "notes-editor";
+  ta.placeholder = "Notas…";
+  ta.rows = 2;
+  ta.value = client.notes || "";
+
+  let saving = false;
+  ta.addEventListener("blur", async () => {
+    if (saving) return;
+    const next = ta.value.trim() || null;
+    const prev = client.notes ?? null;
+    if ((prev ?? null) === (next ?? null)) return;
+
+    saving = true;
+    const { error } = await sb.from("clients").update({ notes: next }).eq("id", client.id);
+    saving = false;
+    if (error) {
+      toast(error.message, "error");
+      ta.value = client.notes || "";
+      return;
+    }
+    client.notes = next;
+    toast("Notas guardadas.", "success", 1500);
+  });
+
+  ta.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ta.value = client.notes || ""; ta.blur(); }
+  });
+
+  return ta;
 }
 
 // Editor inline para enganche/anticipo: monto + forma de pago en una sola
