@@ -121,10 +121,10 @@ function rowFor(client, report, profile, refresh) {
   const tdAmount  = document.createElement("td"); tdAmount.textContent  = client.amount != null ? fmtMoney(client.amount) : "—";
 
   const tdEnganche = document.createElement("td");
-  tdEnganche.appendChild(moneyEditor(client, "enganche"));
+  tdEnganche.appendChild(engancheAnticipoEditor(client, report, profile, "enganche", refresh));
 
   const tdAnticipo = document.createElement("td");
-  tdAnticipo.appendChild(moneyEditor(client, "anticipo"));
+  tdAnticipo.appendChild(engancheAnticipoEditor(client, report, profile, "anticipo", refresh));
 
   const expected = expectedInstallmentCount(client);
   const paid = paidMensualidadCount(client, report);
@@ -143,19 +143,37 @@ function rowFor(client, report, profile, refresh) {
   return tr;
 }
 
-// Input inline para enganche/anticipo: muestra fmtMoney en blur, número crudo
-// en focus, "N/A" como placeholder cuando está vacío. Persiste el cambio en
-// public.clients via UPDATE (RLS: clients_vendor_update).
-function moneyEditor(client, field) {
+// Editor inline para enganche/anticipo: monto + forma de pago en una sola
+// celda. Al cambiar cualquiera de los dos:
+//   1. Actualiza public.clients.{field} (monto contratado).
+//   2. Sincroniza la fila correspondiente en payments_report.installments
+//      (sin fecha, porque para enganche/anticipo no aplica).
+function engancheAnticipoEditor(client, report, profile, field, refresh) {
+  const wrap = document.createElement("div");
+  wrap.className = "ea-editor";
+
   const input = document.createElement("input");
   input.type = "text";
   input.inputMode = "decimal";
   input.placeholder = "N/A";
   input.className = "money-editor";
 
+  const select = document.createElement("select");
+  select.className = "ea-form-select";
+  select.appendChild(opt("", "—"));
+  for (const f of PAYMENT_FORMS) select.appendChild(opt(f, f));
+
+  function currentInstallment() {
+    const target = buildSchedule(client).find((s) => s.kind === field);
+    if (!target || !Array.isArray(report?.installments)) return null;
+    return report.installments.find((it) => it.n === target.n) || null;
+  }
+
   function paint() {
     const v = Number(client[field] || 0);
     input.value = v ? fmtMoney(v) : "";
+    select.value = currentInstallment()?.form || "";
+    select.disabled = !v;
   }
   paint();
 
@@ -166,25 +184,67 @@ function moneyEditor(client, field) {
   });
 
   let saving = false;
-  input.addEventListener("blur", async () => {
+  async function save(newAmount, newForm) {
     if (saving) return;
+    saving = true;
+    try {
+      if ((client[field] ?? null) !== (newAmount ?? null)) {
+        const { error } = await sb.from("clients").update({ [field]: newAmount }).eq("id", client.id);
+        if (error) throw error;
+        client[field] = newAmount;
+      }
+
+      const schedule = buildSchedule(client);
+      const target = schedule.find((s) => s.kind === field);
+      let installments = Array.isArray(report?.installments) ? [...report.installments] : [];
+
+      if (target) {
+        installments = installments.filter((it) => it.n !== target.n);
+        if (newAmount && newAmount > 0 && newForm) {
+          installments.push({ n: target.n, amount: Number(newAmount), form: newForm, date: "" });
+        }
+      }
+
+      const kindByN = new Map(schedule.map((s) => [s.n, s.kind]));
+      const monthsPaid = installments.filter((it) => isMensualidadKind(kindByN.get(it.n))).length;
+      const totalPaid = installments.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+      const { error: prErr } = await sb.from("payments_report").upsert({
+        client_id: client.id,
+        vendor_id: profile.id,
+        months_paid: monthsPaid,
+        total_amount: totalPaid,
+        installments,
+      }, { onConflict: "client_id" });
+      if (prErr) throw prErr;
+
+      if (report) {
+        report.installments = installments;
+        report.months_paid = monthsPaid;
+        report.total_amount = totalPaid;
+      }
+
+      paint();
+      toast("Guardado.", "success", 1500);
+    } catch (e) {
+      toast(e.message || String(e), "error");
+      paint();
+    } finally {
+      saving = false;
+    }
+  }
+
+  input.addEventListener("blur", () => {
     const raw = input.value.replace(/[^\d.\-]/g, "");
     const next = raw === "" ? null : Number(raw);
     const cleaned = Number.isFinite(next) ? next : null;
-    const prev = client[field] ?? null;
-    if ((prev ?? null) === (cleaned ?? null)) { paint(); return; }
+    if ((client[field] ?? null) === (cleaned ?? null)) { paint(); return; }
+    save(cleaned, select.value);
+  });
 
-    saving = true;
-    const { error } = await sb.from("clients").update({ [field]: cleaned }).eq("id", client.id);
-    saving = false;
-    if (error) {
-      toast(error.message, "error");
-      paint();
-      return;
-    }
-    client[field] = cleaned;
-    paint();
-    toast("Guardado.", "success", 1500);
+  select.addEventListener("change", () => {
+    const v = Number(client[field] || 0);
+    save(v > 0 ? v : null, select.value);
   });
 
   input.addEventListener("keydown", (ev) => {
@@ -192,7 +252,8 @@ function moneyEditor(client, field) {
     if (ev.key === "Escape") { paint(); input.blur(); }
   });
 
-  return input;
+  wrap.append(input, select);
+  return wrap;
 }
 
 function paintRowStatus(el, paid, expected) {
@@ -497,7 +558,10 @@ function indexInstallments(arr) {
 }
 
 function isPaidRow(r) {
-  return !!(r.form && r.date && r.amount != null && r.amount !== "");
+  if (r.amount == null || r.amount === "" || !r.form) return false;
+  // Enganche y anticipo no requieren fecha (van directo a capital).
+  if (r.kind === "enganche" || r.kind === "anticipo") return true;
+  return !!r.date;
 }
 
 function buildScheduleRow(r, refreshSummary, persist) {
@@ -523,10 +587,18 @@ function buildScheduleRow(r, refreshSummary, persist) {
   tdForm.appendChild(formSelect);
 
   const tdDate = document.createElement("td");
-  const dateInput = document.createElement("input");
-  dateInput.type = "date";
-  dateInput.value = r.date || "";
-  tdDate.appendChild(dateInput);
+  // Enganche y anticipo no llevan fecha (van directo a capital).
+  const isExtra = r.kind === "enganche" || r.kind === "anticipo";
+  let dateInput = null;
+  if (isExtra) {
+    tdDate.textContent = "—";
+    tdDate.className = "muted";
+  } else {
+    dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.value = r.date || "";
+    tdDate.appendChild(dateInput);
+  }
 
   const tdStatus = document.createElement("td");
   const badge = document.createElement("span");
@@ -563,10 +635,12 @@ function buildScheduleRow(r, refreshSummary, persist) {
     r.amount = raw === "" ? null : Number(raw);
     if (!Number.isFinite(r.amount)) r.amount = null;
     r.form = formSelect.value;
-    r.date = dateInput.value;
+    r.date = dateInput ? dateInput.value : "";
 
-    // Si llena forma+fecha pero el monto sigue vacio, asume el esperado.
-    if (r.form && r.date && (r.amount == null)) {
+    // Si llena forma (y fecha cuando aplica) pero el monto sigue vacio,
+    // asume el esperado.
+    const formAndDateOk = isExtra ? !!r.form : (r.form && r.date);
+    if (formAndDateOk && (r.amount == null)) {
       r.amount = r.expected;
     }
 
@@ -586,7 +660,7 @@ function buildScheduleRow(r, refreshSummary, persist) {
     if (ev.key === "Enter") { ev.preventDefault(); amountInput.blur(); }
   });
   formSelect.addEventListener("change", commit);
-  dateInput.addEventListener("change", commit);
+  if (dateInput) dateInput.addEventListener("change", commit);
 
   tr.append(tdLabel, tdAmount, tdForm, tdDate, tdStatus);
   return tr;

@@ -223,6 +223,21 @@ td input.money-editor {
   text-align: right;
 }
 
+.ea-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 110px;
+}
+.ea-editor .ea-form-select {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.ea-editor .ea-form-select:disabled {
+  background: var(--bg);
+  color: var(--muted);
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;
