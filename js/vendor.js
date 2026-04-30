@@ -127,7 +127,7 @@ function rowFor(client, report, profile, refresh) {
   tdAnticipo.appendChild(moneyEditor(client, "anticipo"));
 
   const expected = expectedInstallmentCount(client);
-  const paid = Number(report?.months_paid || 0);
+  const paid = paidMensualidadCount(client, report);
   const tdProgress = document.createElement("td");
   tdProgress.textContent = expected ? `${paid} / ${expected}` : "—";
 
@@ -204,9 +204,15 @@ function paintRowStatus(el, paid, expected) {
 
 // === Schedule por método ====================================================
 
-// Devuelve [{n, label, expected_amount}] segun el metodo del cliente.
-// Si el cliente tiene enganche o anticipo, se descuentan del total antes de
-// calcular las mensualidades y se agregan como filas propias del schedule.
+// Devuelve [{n, kind, label, expected_amount}] segun el metodo del cliente.
+// `kind` distingue qué cuenta como mensualidad ("mensualidad" | "final") vs
+// pagos a capital que no se difieren ("enganche" | "anticipo").
+//
+// Cronología real:
+//   1. Cliente firma contrato y, opcionalmente, paga anticipo.
+//   2. Día de instalación: paga enganche (cuando aplica).
+//   3. Lo restante (total − enganche − anticipo) se difiere en N
+//      mensualidades, donde N depende del método.
 function buildSchedule(client) {
   const total    = Number(client.amount   || 0);
   const enganche = Number(client.enganche || 0);
@@ -216,15 +222,15 @@ function buildSchedule(client) {
   if (method.startsWith("Contado Parcial-")) {
     if (enganche > 0 || anticipo > 0) {
       const out = [];
-      if (enganche > 0) out.push({ n: 0,  label: "Enganche", expected_amount: enganche });
-      if (anticipo > 0) out.push({ n: -2, label: "Anticipo", expected_amount: anticipo });
-      out.push({ n: 1, label: "Mensualidad final", expected_amount: +(total - enganche - anticipo).toFixed(2) });
+      if (anticipo > 0) out.push({ n: -2, kind: "anticipo", label: "Anticipo", expected_amount: anticipo });
+      if (enganche > 0) out.push({ n: 0,  kind: "enganche", label: "Enganche", expected_amount: enganche });
+      out.push({ n: 1, kind: "final", label: "Mensualidad final", expected_amount: +(total - enganche - anticipo).toFixed(2) });
       return out;
     }
     const eng = +(total * 0.5).toFixed(2);
     return [
-      { n: 0, label: "Enganche (50%)",    expected_amount: eng },
-      { n: 1, label: "Mensualidad final", expected_amount: +(total - eng).toFixed(2) },
+      { n: 0, kind: "enganche", label: "Enganche (50%)",    expected_amount: eng },
+      { n: 1, kind: "final",    label: "Mensualidad final", expected_amount: +(total - eng).toFixed(2) },
     ];
   }
 
@@ -233,27 +239,43 @@ function buildSchedule(client) {
     const n = parseInt(msi[1], 10);
     const mensualidad = +((total - enganche - anticipo) / n).toFixed(2);
     const out = [];
-    if (enganche > 0) out.push({ n: -1, label: "Enganche", expected_amount: enganche });
-    if (anticipo > 0) out.push({ n: -2, label: "Anticipo", expected_amount: anticipo });
+    if (anticipo > 0) out.push({ n: -2, kind: "anticipo", label: "Anticipo", expected_amount: anticipo });
+    if (enganche > 0) out.push({ n: -1, kind: "enganche", label: "Enganche", expected_amount: enganche });
     for (let i = 1; i <= n; i++) {
-      out.push({ n: i, label: `Mensualidad ${i} de ${n}`, expected_amount: mensualidad });
+      out.push({ n: i, kind: "mensualidad", label: `Mensualidad ${i} de ${n}`, expected_amount: mensualidad });
     }
     return out;
   }
 
   // Anticipo Mejoravit / Financiamiento / fallback
   if (enganche === 0 && anticipo === 0) {
-    return [{ n: 1, label: "Plan personalizado", expected_amount: total }];
+    return [{ n: 1, kind: "final", label: "Plan personalizado", expected_amount: total }];
   }
   const out = [];
-  if (enganche > 0) out.push({ n: -1, label: "Enganche", expected_amount: enganche });
-  if (anticipo > 0) out.push({ n: -2, label: "Anticipo", expected_amount: anticipo });
-  out.push({ n: 1, label: "Restante", expected_amount: +(total - enganche - anticipo).toFixed(2) });
+  if (anticipo > 0) out.push({ n: -2, kind: "anticipo", label: "Anticipo", expected_amount: anticipo });
+  if (enganche > 0) out.push({ n: -1, kind: "enganche", label: "Enganche", expected_amount: enganche });
+  out.push({ n: 1, kind: "final", label: "Restante", expected_amount: +(total - enganche - anticipo).toFixed(2) });
   return out;
 }
 
+// Enganche y anticipo van directo a capital, no son mensualidades. Solo
+// "mensualidad" y "final" cuentan en el progreso "Pagadas / Total".
+function isMensualidadKind(kind) {
+  return kind === "mensualidad" || kind === "final";
+}
+
 function expectedInstallmentCount(client) {
-  return buildSchedule(client).length;
+  return buildSchedule(client).filter((r) => isMensualidadKind(r.kind)).length;
+}
+
+// Cuenta cuántas mensualidades reales (no enganche / anticipo) ya están
+// pagadas, usando el schedule del cliente para clasificar los `n` guardados.
+// Para datos viejos sin `installments` cae al campo legado months_paid.
+function paidMensualidadCount(client, report) {
+  if (!report) return 0;
+  if (!Array.isArray(report.installments)) return Number(report.months_paid || 0);
+  const kindByN = new Map(buildSchedule(client).map((s) => [s.n, s.kind]));
+  return report.installments.filter((it) => isMensualidadKind(kindByN.get(it.n))).length;
 }
 
 // Importe diferido por mes para el método del cliente. Devuelve null si el
@@ -335,6 +357,7 @@ function openClientDetail(client, report, profile, refresh) {
   const saved = indexInstallments(report?.installments);
   const rows = schedule.map((item) => ({
     n: item.n,
+    kind: item.kind,
     label: item.label,
     expected: item.expected_amount,
     amount: saved.get(item.n)?.amount ?? null,
@@ -344,7 +367,8 @@ function openClientDetail(client, report, profile, refresh) {
 
   function refreshSummary() {
     const paidRows = rows.filter(isPaidRow);
-    const monthsPaid = paidRows.length;
+    const mensualidadRows = rows.filter((r) => isMensualidadKind(r.kind));
+    const monthsPaid = paidRows.filter((r) => isMensualidadKind(r.kind)).length;
     const totalPaid = paidRows.reduce((s, r) => s + Number(r.amount || 0), 0);
     const totalContract = Number(client.amount || 0);
     clear(summary);
@@ -352,7 +376,7 @@ function openClientDetail(client, report, profile, refresh) {
       stat("Total contratado", fmtMoney(totalContract)),
       stat("Pagado a la fecha", fmtMoney(totalPaid)),
       stat("Pte conciliar", fmtMoney(Math.max(0, totalContract - totalPaid)), "danger"),
-      stat("Mensualidades", `${monthsPaid} / ${rows.length}`),
+      stat("Mensualidades", `${monthsPaid} / ${mensualidadRows.length}`),
     );
   }
 
@@ -360,7 +384,7 @@ function openClientDetail(client, report, profile, refresh) {
     const installments = rows
       .filter(isPaidRow)
       .map((r) => ({ n: r.n, amount: Number(r.amount), form: r.form, date: r.date }));
-    const monthsPaid = installments.length;
+    const monthsPaid = rows.filter((r) => isPaidRow(r) && isMensualidadKind(r.kind)).length;
     const totalPaid = installments.reduce((s, r) => s + Number(r.amount || 0), 0);
 
     return sb.from("payments_report").upsert({
