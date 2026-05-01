@@ -692,6 +692,7 @@ a.row-link:hover { text-decoration: underline; }
   display: flex; gap: 8px; justify-content: flex-end;
   margin-top: 8px;
 }
+.modal .actions button { white-space: nowrap; }
 
 /* Toasts */
 #toast-stack {

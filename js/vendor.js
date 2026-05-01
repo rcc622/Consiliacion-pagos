@@ -286,7 +286,6 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       <th>Monto</th>
       <th>Forma de pago</th>
       <th>Fecha de pago</th>
-      <th>Status</th>
       <th></th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
@@ -427,7 +426,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
     if (rows.length === 0) {
       const empty = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 6;
+      td.colSpan = 5;
       td.className = "muted center";
       td.style.textAlign = "center";
       td.textContent = "Sin pagos capturados. Click en + Agregar fila.";
@@ -468,10 +467,6 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
     dateInput.value = r.date || "";
     tdDate.appendChild(dateInput);
 
-    const tdStatus = document.createElement("td");
-    const badge = document.createElement("span");
-    tdStatus.appendChild(badge);
-
     const tdDel = document.createElement("td");
     const delBtn = document.createElement("button");
     delBtn.type = "button";
@@ -484,16 +479,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       if (r.amount != null && r.amount !== "") amountInput.value = fmtMoney(Number(r.amount));
       else amountInput.value = "";
     }
-    function paintBadge() {
-      if (isPaidRow(r)) { badge.className = "badge ok"; badge.textContent = "Pagado"; }
-      else if ((r.amount != null && r.amount !== "") || r.form || r.date) {
-        badge.className = "badge partial"; badge.textContent = "Incompleto";
-      } else {
-        badge.className = "badge pending"; badge.textContent = "Vacío";
-      }
-    }
     paintAmount();
-    paintBadge();
 
     let pendingSave = false;
     async function save() {
@@ -511,7 +497,6 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       r.form = formSelect.value;
       r.date = dateInput.value;
       paintAmount();
-      paintBadge();
       refreshSummary();
       save();
     }
@@ -539,7 +524,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       if (error) toast(error.message, "error");
     });
 
-    tr.append(tdIdx, tdAmount, tdForm, tdDate, tdStatus, tdDel);
+    tr.append(tdIdx, tdAmount, tdForm, tdDate, tdDel);
     return tr;
   }
 
