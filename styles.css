@@ -419,12 +419,14 @@ td textarea.notes-editor {
   font: inherit;
   width: 220px;
   min-height: 44px;
+  max-height: 60px;
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
   resize: vertical;
+  overflow-y: auto;
 }
 td textarea.notes-editor:focus {
   outline: 2px solid var(--primary);
@@ -433,11 +435,39 @@ td textarea.notes-editor:focus {
 }
 
 td.notes-cell {
-  max-width: 240px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  max-width: 280px;
   color: var(--muted);
+  vertical-align: middle;
 }
+td.notes-cell .notes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+td.notes-cell .notes-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+td.notes-cell.expanded .notes-row { display: block; }
+td.notes-cell.expanded .notes-text {
+  white-space: normal;
+  word-break: break-word;
+}
+td.notes-cell .notes-toggle {
+  background: transparent;
+  border: 0;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+  flex: none;
+  white-space: nowrap;
+}
+td.notes-cell .notes-toggle:hover { text-decoration: underline; }
 
 td.vendor-asesor {
   font-style: italic;

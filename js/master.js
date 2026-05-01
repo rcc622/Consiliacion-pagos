@@ -472,11 +472,14 @@ function paintDetail(container, vendors, clients, reports, refresh) {
         <td>${Number(c.enganche || 0) > 0 ? fmtMoney(c.enganche) : "—"}</td>
         <td>${Number(c.anticipo || 0) > 0 ? fmtMoney(c.anticipo) : "—"}</td>
         <td>${fmtMoney(conciliado)}</td>
-        <td><span class="badge ${status.cls}">${status.label}</span></td>
-        <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
+        <td><span class="badge ${status.cls}">${status.label}</span></td>`;
       const tmpl = document.createElement("template");
       tmpl.innerHTML = fixedHtml.trim();
       while (tmpl.content.firstChild) tr.appendChild(tmpl.content.firstChild);
+
+      // Notas: celda con truncado a 1 línea + botón "Ver" si el texto se
+      // pasa. Mantiene la fila compacta sin importar el largo de la nota.
+      tr.appendChild(buildNotesCell(c.notes || ""));
 
       const tdActions = document.createElement("td");
       tdActions.style.whiteSpace = "nowrap";
@@ -1135,6 +1138,37 @@ async function addClientFlow(refresh) {
   if (insErr) { toast(insErr.message, "error"); return; }
   toast("Cliente creado.", "success");
   refresh();
+}
+
+// Celda de notas con truncado a 1 línea + botón Ver/Ocultar si el texto
+// se pasa. Mantiene la fila a altura estándar.
+function buildNotesCell(notes) {
+  const td = document.createElement("td");
+  td.className = "notes-cell";
+  if (!notes) {
+    td.textContent = "—";
+    return td;
+  }
+  const wrap = document.createElement("span");
+  wrap.className = "notes-row";
+  const text = document.createElement("span");
+  text.className = "notes-text";
+  text.textContent = notes;
+  wrap.appendChild(text);
+  if (notes.length > 30) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "notes-toggle";
+    toggle.textContent = "Ver";
+    toggle.onclick = (ev) => {
+      ev.stopPropagation();
+      const expanded = td.classList.toggle("expanded");
+      toggle.textContent = expanded ? "Ocultar" : "Ver";
+    };
+    wrap.appendChild(toggle);
+  }
+  td.appendChild(wrap);
+  return td;
 }
 
 function escapeHtml(s) {
