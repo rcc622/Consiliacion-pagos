@@ -364,17 +364,10 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       th.appendChild(buildFilterableHeader(col, clients, filterCtx, () => repaintBody()));
     } else {
       const labelSpan = document.createElement("span");
-      labelSpan.className = "th-label sortable-only";
+      labelSpan.className = "th-label";
       labelSpan.textContent = col.label;
       th.appendChild(labelSpan);
     }
-
-    th.classList.add("sortable");
-    th.addEventListener("click", (ev) => {
-      // No disparar sort si el click vino del botón ▾ del filtro.
-      if (ev.target.closest(".th-filter-btn")) return;
-      onClickSort(col);
-    });
     trh.appendChild(th);
   }
 
@@ -387,17 +380,6 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   const tbody = document.createElement("tbody");
   tableEl.appendChild(tbody);
   container.appendChild(tableEl);
-
-  function onClickSort(col) {
-    if (clientSort.col === col.key) {
-      clientSort.dir = -clientSort.dir;
-    } else {
-      clientSort.col = col.key;
-      clientSort.dir = col.type === "number" ? -1 : 1;
-    }
-    paintSortIndicators();
-    repaintBody();
-  }
 
   function paintSortIndicators() {
     for (const col of CLIENT_COLS) {
@@ -439,6 +421,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   }
 
   function repaintBody() {
+    paintSortIndicators();
     const filtered = applyClientFilters(clients, filterCtx);
     const sorted = applyClientSort(filtered, filterCtx);
     clear(tbody);
