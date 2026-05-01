@@ -529,6 +529,52 @@ td.vendor-asesor {
 
 /* Forma apilada para mini-modales */
 .modal .stacked-form { display: flex; flex-direction: column; gap: 10px; }
+
+/* Modal de configuración de export */
+.modal.export-config-modal {
+  width: 480px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+.export-section {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+.export-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.export-section-links a {
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 13px;
+}
+.export-section-links a:hover { text-decoration: underline; }
+.export-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.export-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.export-row:hover { background: var(--bg); }
+.export-row input { flex: none; margin: 0; }
 .client-info-grid .info-field-action { justify-content: flex-end; }
 .client-info-grid .info-field-action button { padding: 6px 10px; }
 .client-info-grid .info-field-action button.active-on {

@@ -1,28 +1,43 @@
-// Exporta la conciliación completa agrupada por zona.
+// Exportación a XLSX/CSV con pre-configuración.
 //
-// XLSX: una hoja por zona.
-// CSV : un solo archivo con BOM UTF-8 y secciones por zona.
+// Estructura del XLSX:
+//   - 1 hoja por asesor (vendedor).
+//   - Dentro de cada hoja, bloques separados por método de pago.
+//   - Bloques con métodos de mensualidades (MSI / Meses Sin Intereses)
+//     incluyen N tripletas (Mens N, Fecha MN, F. Pago MN), donde N es el
+//     máximo de mensualidades capturadas en ese bloque.
+//   - El usuario puede filtrar por vendedor y por método antes de exportar.
 
 import { sb } from "./supabase.js";
-import { toast } from "./ui.js";
+import { toast, clear } from "./ui.js";
 
-const COLUMNS = [
+const BASE_COLS = [
   "Cliente",
-  "Vendedor",
   "Método de pago",
-  "Monto contratado",
+  "Monto Proyecto",
   "Conciliado",
-  "Pte conciliar",
+  "Pte Conciliar %",
   "Estado",
-  "Activo",
-  "Notas",
+  "", // separador
+  "$ Enganche",
+  "Fecha Eng.",
+  "F. Pago Eng.",
+  "$ Anticipo",
+  "Fecha Ant.",
+  "F. Pago Ant.",
 ];
+
+// Métodos que se consideran a mensualidades (se agregan columnas Mens N).
+function isInstallmentMethod(method) {
+  if (!method) return false;
+  return /MSI|Meses Sin Intereses/i.test(method);
+}
 
 async function fetchData() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_method, amount, notes, is_active"),
-    sb.from("payments_report").select("client_id, total_amount"),
+    sb.from("clients").select("id, name, vendor_id, payment_method, amount, status, enganche, enganche_form, enganche_date, anticipo, anticipo_form, anticipo_date, notes"),
+    sb.from("payments_report").select("client_id, total_amount, installments"),
   ]);
   for (const r of [vendorsRes, clientsRes, reportsRes]) {
     if (r.error) throw r.error;
@@ -32,6 +47,14 @@ async function fetchData() {
     clients: clientsRes.data || [],
     reports: reportsRes.data || [],
   };
+}
+
+function deriveStatus(c, conciliado) {
+  if (c.status) return c.status;
+  const monto = Number(c.amount || 0);
+  if (monto > 0 && conciliado >= monto) return "Conciliado";
+  if (conciliado > 0) return "Parcial";
+  return "Pendiente";
 }
 
 function buildRows({ vendors, clients, reports }) {
@@ -44,74 +67,99 @@ function buildRows({ vendors, clients, reports }) {
     const monto = Number(c.amount || 0);
     const conciliado = Number(r?.total_amount || 0);
     const pte = Math.max(0, monto - conciliado);
-    let estado = "Pendiente";
-    if (monto > 0 && conciliado >= monto) estado = "Conciliado";
-    else if (conciliado > 0) estado = "Parcial";
+    const pctPte = monto > 0 ? Math.round((pte / monto) * 1000) / 10 : 0;
+    const installments = (Array.isArray(r?.installments) ? r.installments : [])
+      .slice()
+      .sort((a, b) => (a.n || 0) - (b.n || 0));
     return {
-      zona: c.zone || "Sin zona",
+      vendor_id: c.vendor_id || null,
+      vendor_label: v ? (v.full_name || v.email) : "Sin vendedor",
       cliente: c.name,
-      vendedor: v ? (v.full_name || v.email) : "—",
       metodo: c.payment_method || "—",
       monto,
       conciliado,
-      pte,
-      estado,
-      activo: c.is_active ? "Sí" : "",
-      notas: c.notes || "",
+      pte_pct: `${pctPte}%`,
+      estado: deriveStatus(c, conciliado),
+      enganche: Number(c.enganche || 0) || "",
+      enganche_date: c.enganche_date || "",
+      enganche_form: c.enganche_form === "N/A" ? "N/A" : (c.enganche_form || ""),
+      anticipo: Number(c.anticipo || 0) || "",
+      anticipo_date: c.anticipo_date || "",
+      anticipo_form: c.anticipo_form === "N/A" ? "N/A" : (c.anticipo_form || ""),
+      installments,
     };
   });
 }
 
-function groupByZone(rows) {
-  const byZone = new Map();
+function applyFilters(rows, config) {
+  return rows.filter((row) => {
+    if (config.vendor_ids && !config.vendor_ids.has(row.vendor_id)) return false;
+    if (config.methods && !config.methods.has(row.metodo)) return false;
+    return true;
+  });
+}
+
+// Agrupa rows por vendedor y luego por método dentro de cada vendedor.
+function groupForExport(rows) {
+  const byVendor = new Map();
   for (const row of rows) {
-    if (!byZone.has(row.zona)) byZone.set(row.zona, []);
-    byZone.get(row.zona).push(row);
+    if (!byVendor.has(row.vendor_label)) byVendor.set(row.vendor_label, new Map());
+    const byMethod = byVendor.get(row.vendor_label);
+    if (!byMethod.has(row.metodo)) byMethod.set(row.metodo, []);
+    byMethod.get(row.metodo).push(row);
   }
-  return [...byZone.entries()]
+  return [...byVendor.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([zona, list]) => ({
-      zona,
-      rows: list.slice().sort((a, b) => a.cliente.localeCompare(b.cliente)),
+    .map(([vendorLabel, byMethod]) => ({
+      vendorLabel,
+      blocks: [...byMethod.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([metodo, list]) => ({
+          metodo,
+          rows: list.sort((a, b) => a.cliente.localeCompare(b.cliente)),
+        })),
     }));
 }
 
-export async function exportConciliation(format) {
-  let data;
-  try {
-    data = await fetchData();
-  } catch (e) {
-    toast(`Error obteniendo datos: ${e.message || e}`, "error");
-    return;
+function buildBlockHeaders(metodo, rowsInBlock) {
+  if (!isInstallmentMethod(metodo)) return BASE_COLS.slice();
+  let maxN = 0;
+  for (const row of rowsInBlock) {
+    if (row.installments.length > maxN) maxN = row.installments.length;
   }
-  const rows = buildRows(data);
-  if (!rows.length) {
-    toast("No hay clientes que exportar.", "info");
-    return;
+  const out = BASE_COLS.slice();
+  for (let i = 1; i <= maxN; i++) {
+    out.push(`Mens ${i}`, `Fecha M${i}`, `F. Pago M${i}`);
   }
-
-  const grouped = groupByZone(rows);
-  const ts = new Date().toISOString().slice(0, 10);
-
-  if (format === "xlsx") {
-    exportXLSX(grouped, `conciliacion_${ts}.xlsx`);
-  } else {
-    exportCSV(grouped, `conciliacion_${ts}.csv`);
-  }
+  return out;
 }
 
-function rowToArray(row) {
-  return [
+function rowToArray(row, headers) {
+  const baseLen = BASE_COLS.length;
+  const arr = [
     row.cliente,
-    row.vendedor,
     row.metodo,
     row.monto,
     row.conciliado,
-    row.pte,
+    row.pte_pct,
     row.estado,
-    row.activo,
-    row.notas,
+    "",
+    row.enganche,
+    row.enganche_date,
+    row.enganche_form,
+    row.anticipo,
+    row.anticipo_date,
+    row.anticipo_form,
   ];
+  // Tripletas de mensualidades (si la fila tiene), hasta lo que pidan los headers.
+  const extraN = (headers.length - baseLen) / 3;
+  for (let i = 0; i < extraN; i++) {
+    const it = row.installments[i];
+    arr.push(it ? it.amount : "");
+    arr.push(it ? it.date   : "");
+    arr.push(it ? it.form   : "");
+  }
+  return arr;
 }
 
 function exportXLSX(grouped, filename) {
@@ -119,21 +167,28 @@ function exportXLSX(grouped, filename) {
   const XLSX = window.XLSX;
   const wb = XLSX.utils.book_new();
 
-  for (const zoneGroup of grouped) {
+  for (const vendorGroup of grouped) {
     const aoa = [];
-    aoa.push([`ZONA: ${String(zoneGroup.zona).toUpperCase()}`]);
+    aoa.push([`ASESOR: ${vendorGroup.vendorLabel.toUpperCase()}`]);
     aoa.push([]);
-    aoa.push(COLUMNS);
-    for (const row of zoneGroup.rows) aoa.push(rowToArray(row));
+
+    for (const block of vendorGroup.blocks) {
+      const headers = buildBlockHeaders(block.metodo, block.rows);
+      aoa.push([`Método de pago: ${block.metodo}`]);
+      aoa.push(headers);
+      for (const row of block.rows) aoa.push(rowToArray(row, headers));
+      aoa.push([]); // separador entre bloques
+    }
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
+    // Anchos básicos para las primeras columnas; las dinámicas usan default.
     ws["!cols"] = [
-      { wch: 28 }, { wch: 22 }, { wch: 24 },
-      { wch: 16 }, { wch: 16 }, { wch: 14 },
-      { wch: 12 }, { wch: 8 }, { wch: 30 },
+      { wch: 30 }, { wch: 24 }, { wch: 14 }, { wch: 14 },
+      { wch: 12 }, { wch: 12 }, { wch: 2  },
+      { wch: 12 }, { wch: 12 }, { wch: 14 },
+      { wch: 12 }, { wch: 12 }, { wch: 14 },
     ];
-    const sheetName = sanitizeSheetName(zoneGroup.zona);
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(vendorGroup.vendorLabel));
   }
 
   XLSX.writeFile(wb, filename);
@@ -141,30 +196,31 @@ function exportXLSX(grouped, filename) {
 }
 
 function sanitizeSheetName(name) {
-  // Excel: <= 31 chars y prohibe : \ / ? * [ ]
   return String(name).replace(/[:\\/?*\[\]]/g, "_").slice(0, 31);
 }
 
 function exportCSV(grouped, filename) {
   const lines = [];
-  for (const zoneGroup of grouped) {
-    lines.push(csvLine([`ZONA: ${String(zoneGroup.zona).toUpperCase()}`]));
+  for (const vendorGroup of grouped) {
+    lines.push(csvLine([`ASESOR: ${vendorGroup.vendorLabel.toUpperCase()}`]));
     lines.push("");
-    lines.push(csvLine(COLUMNS));
-    for (const row of zoneGroup.rows) lines.push(csvLine(rowToArray(row)));
+    for (const block of vendorGroup.blocks) {
+      const headers = buildBlockHeaders(block.metodo, block.rows);
+      lines.push(csvLine([`Método de pago: ${block.metodo}`]));
+      lines.push(csvLine(headers));
+      for (const row of block.rows) lines.push(csvLine(rowToArray(row, headers)));
+      lines.push("");
+    }
     lines.push("");
   }
-  // BOM UTF-8 al inicio para que Excel respete acentos / ñ
+  // BOM UTF-8 para que Excel respete acentos.
   const csv = "﻿" + lines.join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   triggerDownload(blob, filename);
   toast(`Exportado: ${filename}`, "success");
 }
 
-function csvLine(values) {
-  return values.map(csvEscape).join(",");
-}
-
+function csvLine(values) { return values.map(csvEscape).join(","); }
 function csvEscape(val) {
   if (val == null) return "";
   const s = String(val);
@@ -173,7 +229,6 @@ function csvEscape(val) {
   }
   return s;
 }
-
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -183,4 +238,150 @@ function triggerDownload(blob, filename) {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// === Modal de pre-configuración =============================================
+
+function openExportConfigModal({ vendors, methods }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+
+    const modal = document.createElement("div");
+    modal.className = "modal export-config-modal";
+
+    const h = document.createElement("h2");
+    h.textContent = "Configurar exportación";
+    modal.appendChild(h);
+
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.style.margin = "0";
+    note.textContent = "Selecciona qué incluir en el archivo. Por defecto se incluye todo.";
+    modal.appendChild(note);
+
+    const vendorSection = buildCheckboxSection("Vendedores", vendors.map((v) => ({
+      value: v.id, label: v.full_name || v.email,
+    })));
+    modal.appendChild(vendorSection.wrap);
+
+    const methodSection = buildCheckboxSection("Métodos de pago", methods.map((m) => ({
+      value: m, label: m,
+    })));
+    modal.appendChild(methodSection.wrap);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "ghost";
+    cancel.textContent = "Cancelar";
+    cancel.onclick = () => { backdrop.remove(); resolve(null); };
+    const submit = document.createElement("button");
+    submit.type = "button";
+    submit.textContent = "Exportar";
+    submit.onclick = () => {
+      backdrop.remove();
+      resolve({
+        vendor_ids: vendorSection.getSelected(),
+        methods: methodSection.getSelected(),
+      });
+    };
+    actions.append(cancel, submit);
+    modal.appendChild(actions);
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve(null); }
+    });
+  });
+}
+
+function buildCheckboxSection(title, options) {
+  const wrap = document.createElement("div");
+  wrap.className = "export-section";
+
+  const head = document.createElement("div");
+  head.className = "export-section-head";
+  const t = document.createElement("strong");
+  t.textContent = title;
+  const links = document.createElement("span");
+  links.className = "export-section-links";
+  const all = document.createElement("a");
+  all.href = "#"; all.textContent = "Todos";
+  const none = document.createElement("a");
+  none.href = "#"; none.textContent = "Ninguno";
+  links.append(all, document.createTextNode(" · "), none);
+  head.append(t, links);
+  wrap.appendChild(head);
+
+  const list = document.createElement("div");
+  list.className = "export-section-list";
+  const checks = [];
+  for (const opt of options) {
+    const row = document.createElement("label");
+    row.className = "export-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = true;
+    cb.value = opt.value;
+    const span = document.createElement("span");
+    span.textContent = opt.label;
+    row.append(cb, span);
+    list.appendChild(row);
+    checks.push(cb);
+  }
+  wrap.appendChild(list);
+
+  all.onclick = (ev) => { ev.preventDefault(); for (const c of checks) c.checked = true; };
+  none.onclick = (ev) => { ev.preventDefault(); for (const c of checks) c.checked = false; };
+
+  return {
+    wrap,
+    getSelected() {
+      const set = new Set();
+      for (const c of checks) if (c.checked) set.add(c.value);
+      return set;
+    },
+  };
+}
+
+// === Punto de entrada =======================================================
+
+export async function exportConciliation(format) {
+  let data;
+  try {
+    data = await fetchData();
+  } catch (e) {
+    toast(`Error obteniendo datos: ${e.message || e}`, "error");
+    return;
+  }
+  if (!data.clients.length) {
+    toast("No hay clientes que exportar.", "info");
+    return;
+  }
+
+  const allRows = buildRows(data);
+  // Listas únicas para el modal de configuración.
+  const allMethods = [...new Set(allRows.map((r) => r.metodo))].sort((a, b) => a.localeCompare(b));
+  const config = await openExportConfigModal({ vendors: data.vendors, methods: allMethods });
+  if (!config) return;
+
+  // Sets vacíos = nada selecciona; advertir.
+  if (!config.vendor_ids.size || !config.methods.size) {
+    toast("No seleccionaste nada que exportar.", "info");
+    return;
+  }
+
+  const filtered = applyFilters(allRows, config);
+  if (!filtered.length) {
+    toast("Ningún cliente cumple los filtros.", "info");
+    return;
+  }
+
+  const grouped = groupForExport(filtered);
+  const ts = new Date().toISOString().slice(0, 10);
+  if (format === "xlsx") exportXLSX(grouped, `conciliacion_${ts}.xlsx`);
+  else                   exportCSV(grouped, `conciliacion_${ts}.csv`);
 }
