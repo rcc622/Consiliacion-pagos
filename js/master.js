@@ -1131,6 +1131,7 @@ function clientStatus(client, conciliado) {
       case "Activo":     return { cls: "ok", label: "Activo" };
       case "Parcial":    return { cls: "partial", label: "Parcial" };
       case "Pendiente":  return { cls: "pending", label: "Pendiente" };
+      case "Cancelado":  return { cls: "cancelled", label: "Cancelado" };
       default:           return { cls: "partial", label: client.status };
     }
   }

@@ -168,6 +168,7 @@ function statusBadge(status) {
     case "Activo":     return { cls: "ok", label: "Activo" };
     case "Parcial":    return { cls: "partial", label: "Parcial" };
     case "Pendiente":  return { cls: "pending", label: "Pendiente" };
+    case "Cancelado":  return { cls: "cancelled", label: "Cancelado" };
     default:           return { cls: "partial", label: status };
   }
 }
@@ -613,7 +614,7 @@ function moneyEditorBlock(label, client, field) {
 // Select de estatus del cliente. Reemplaza al toggle binario "Activo".
 // Persiste en clients.status. Vacío ("Auto") = el badge se deriva del
 // conciliado vs monto.
-const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado"];
+const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado"];
 
 function statusPicker(client) {
   const wrap = document.createElement("div");

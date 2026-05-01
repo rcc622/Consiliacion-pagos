@@ -420,9 +420,10 @@ td.vendor-asesor {
   font-size: 12px;
   font-weight: 500;
 }
-.badge.ok      { background: #dcfce7; color: var(--success); }
-.badge.pending { background: #fef3c7; color: var(--warning); }
-.badge.partial { background: #dbeafe; color: var(--primary); }
+.badge.ok        { background: #dcfce7; color: var(--success); }
+.badge.pending   { background: #fef3c7; color: var(--warning); }
+.badge.partial   { background: #dbeafe; color: var(--primary); }
+.badge.cancelled { background: #e5e7eb; color: #4b5563; text-decoration: line-through; }
 
 /* Vendedor placeholder ("asesor" / "asesor comercial") */
 td.vendor-asesor {
