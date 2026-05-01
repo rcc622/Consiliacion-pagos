@@ -223,25 +223,49 @@ function sanitizeSheetName(name) {
   return String(name).replace(/[:\\/?*\[\]]/g, "_").slice(0, 31);
 }
 
-function exportCSV(grouped, filename) {
+// Construye el CSV de UN asesor (con sus bloques por método). Sin BOM,
+// el caller decide si lo agrega.
+function buildVendorCSV(vendorGroup) {
   const lines = [];
-  for (const vendorGroup of grouped) {
-    lines.push(csvLine([`ASESOR: ${vendorGroup.vendorLabel.toUpperCase()}`]));
-    lines.push("");
-    for (const block of vendorGroup.blocks) {
-      const headers = buildBlockHeaders(block.metodo, block.rows);
-      lines.push(csvLine([`Método de pago: ${block.metodo}`]));
-      lines.push(csvLine(headers));
-      for (const row of block.rows) lines.push(csvLine(rowToArray(row, headers)));
-      lines.push("");
-    }
+  for (const block of vendorGroup.blocks) {
+    const headers = buildBlockHeaders(block.metodo, block.rows);
+    lines.push(csvLine([`Método de pago: ${block.metodo}`]));
+    lines.push(csvLine(headers));
+    for (const row of block.rows) lines.push(csvLine(rowToArray(row, headers)));
     lines.push("");
   }
-  // BOM UTF-8 para que Excel respete acentos.
-  const csv = "﻿" + lines.join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  return lines.join("\r\n");
+}
+
+// 1 asesor → un único .csv con BOM UTF-8.
+// >1 asesores → un .zip con un .csv por asesor.
+async function exportCSV(grouped, baseName) {
+  if (grouped.length === 1) {
+    const csv = "﻿" + buildVendorCSV(grouped[0]);
+    const filename = `${baseName}_${sanitizeFileName(grouped[0].vendorLabel)}.csv`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    triggerDownload(blob, filename);
+    toast(`Exportado: ${filename}`, "success");
+    return;
+  }
+
+  if (!window.JSZip) {
+    toast("JSZip no está disponible. No se puede armar el zip.", "error");
+    return;
+  }
+  const zip = new window.JSZip();
+  for (const vendorGroup of grouped) {
+    const csv = "﻿" + buildVendorCSV(vendorGroup);
+    zip.file(`${sanitizeFileName(vendorGroup.vendorLabel)}.csv`, csv);
+  }
+  const blob = await zip.generateAsync({ type: "blob" });
+  const filename = `${baseName}.zip`;
   triggerDownload(blob, filename);
-  toast(`Exportado: ${filename}`, "success");
+  toast(`Exportado: ${filename} (${grouped.length} asesores)`, "success");
+}
+
+function sanitizeFileName(name) {
+  return String(name).replace(/[\\/:*?"<>|]/g, "_").trim() || "asesor";
 }
 
 function csvLine(values) { return values.map(csvEscape).join(","); }
@@ -407,5 +431,5 @@ export async function exportConciliation(format) {
   const grouped = groupForExport(filtered);
   const ts = new Date().toISOString().slice(0, 10);
   if (format === "xlsx") exportXLSX(grouped, `conciliacion_${ts}.xlsx`);
-  else                   exportCSV(grouped, `conciliacion_${ts}.csv`);
+  else                   await exportCSV(grouped, `conciliacion_${ts}`);
 }

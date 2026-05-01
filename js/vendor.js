@@ -784,6 +784,11 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
 // Persiste en clients.status. Vacío ("Auto") = el badge se deriva del
 // conciliado vs monto.
 const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado"];
+// El vendedor solo puede aplicar manualmente Activo o Cancelado. Los demás
+// (Pendiente / Parcial / Conciliado) salen del derivado automático de
+// conciliado vs monto, así no se le da al asesor la opción de marcar como
+// conciliado algo que no lo está. El master sí puede usar todos.
+const VENDOR_STATUS_OPTIONS = ["Activo", "Cancelado"];
 
 // Notas dentro del modal del cliente. Ocupa el ancho completo del grid.
 // Persiste al perder foco (igual que el editor de la tabla del vendor).
@@ -825,6 +830,10 @@ function notesEditorBlock(client) {
 }
 
 function statusPicker(client) {
+  const profile = getProfile();
+  const isVendor = profile?.role === "vendor";
+  const allowed = isVendor ? VENDOR_STATUS_OPTIONS : STATUS_OPTIONS;
+
   const wrap = document.createElement("div");
   wrap.className = "info-field";
 
@@ -834,7 +843,12 @@ function statusPicker(client) {
 
   const select = document.createElement("select");
   select.appendChild(opt("", "Auto"));
-  for (const s of STATUS_OPTIONS) select.appendChild(opt(s, s));
+  for (const s of allowed) select.appendChild(opt(s, s));
+  // Si el status actual fue puesto por master fuera del catálogo del vendor,
+  // lo mostramos para que se vea (etiquetado) y no se pierda al cambiar.
+  if (client.status && !allowed.includes(client.status)) {
+    select.appendChild(opt(client.status, `${client.status} (master)`));
+  }
   select.value = client.status || "";
 
   let saving = false;
