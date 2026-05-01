@@ -9,7 +9,7 @@
 //   - Activo: bandera del cliente que indica al admin que la diferencia
 //     entre monto y conciliado es esperada (cliente sigue pagando).
 
-import { sb } from "./supabase.js";
+import { sb, fetchAll } from "./supabase.js";
 import { clear, toast, fmtMoney } from "./ui.js";
 import { getProfile } from "./auth.js";
 
@@ -54,17 +54,13 @@ function headerNode(profile) {
 }
 
 async function loadData() {
-  const [clientsRes, reportsRes] = await Promise.all([
-    sb.from("clients")
+  const [clients, reports] = await Promise.all([
+    fetchAll(() => sb.from("clients")
       .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status, enganche_form, enganche_date, anticipo_form, anticipo_date, vendor_id")
-      .order("name"),
-    sb.from("payments_report").select("client_id, total_amount, installments, updated_at"),
+      .order("name")),
+    fetchAll(() => sb.from("payments_report").select("client_id, total_amount, installments, updated_at")),
   ]);
-
-  if (clientsRes.error) { toast(clientsRes.error.message, "error"); throw clientsRes.error; }
-  if (reportsRes.error) { toast(reportsRes.error.message, "error"); throw reportsRes.error; }
-
-  return { clients: clientsRes.data || [], reports: reportsRes.data || [] };
+  return { clients, reports };
 }
 
 function paintSummary(container, clients, reports) {

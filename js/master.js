@@ -1,6 +1,6 @@
 // Vista master: dashboard de progreso por vendedor / zona + import + alta manual.
 
-import { sb } from "./supabase.js";
+import { sb, fetchAll } from "./supabase.js";
 import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
 import { parseFile, importRows } from "./import.js";
 import { exportConciliation } from "./export.js";
@@ -142,20 +142,20 @@ function buildToolbar(refresh) {
 }
 
 async function loadAll() {
-  const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
+  // clients y payments_report pueden tener miles de filas; paginamos para
+  // no quedarnos cortos en el límite default del PostgREST.
+  const [vendorsRes, clients, reports] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date"),
-    sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
+    fetchAll(() => sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date")),
+    fetchAll(() => sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at")),
   ]);
 
-  for (const r of [vendorsRes, clientsRes, reportsRes]) {
-    if (r.error) { toast(r.error.message, "error"); throw r.error; }
-  }
+  if (vendorsRes.error) { toast(vendorsRes.error.message, "error"); throw vendorsRes.error; }
 
   return {
     vendors: vendorsRes.data || [],
-    clients: clientsRes.data || [],
-    reports: reportsRes.data || [],
+    clients,
+    reports,
   };
 }
 

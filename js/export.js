@@ -8,7 +8,7 @@
 //     máximo de mensualidades capturadas en ese bloque.
 //   - El usuario puede filtrar por vendedor y por método antes de exportar.
 
-import { sb } from "./supabase.js";
+import { sb, fetchAll } from "./supabase.js";
 import { toast, clear } from "./ui.js";
 
 const BASE_COLS = [
@@ -34,19 +34,13 @@ function isInstallmentMethod(method) {
 }
 
 async function fetchData() {
-  const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
+  const [vendorsRes, clients, reports] = await Promise.all([
     sb.from("profiles").select("id, email, full_name").eq("role", "vendor"),
-    sb.from("clients").select("id, name, vendor_id, payment_method, amount, status, enganche, enganche_form, enganche_date, anticipo, anticipo_form, anticipo_date, notes"),
-    sb.from("payments_report").select("client_id, total_amount, installments"),
+    fetchAll(() => sb.from("clients").select("id, name, vendor_id, payment_method, amount, status, enganche, enganche_form, enganche_date, anticipo, anticipo_form, anticipo_date, notes")),
+    fetchAll(() => sb.from("payments_report").select("client_id, total_amount, installments")),
   ]);
-  for (const r of [vendorsRes, clientsRes, reportsRes]) {
-    if (r.error) throw r.error;
-  }
-  return {
-    vendors: vendorsRes.data || [],
-    clients: clientsRes.data || [],
-    reports: reportsRes.data || [],
-  };
+  if (vendorsRes.error) throw vendorsRes.error;
+  return { vendors: vendorsRes.data || [], clients, reports };
 }
 
 function deriveStatus(c, conciliado) {
