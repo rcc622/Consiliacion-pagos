@@ -51,6 +51,7 @@ create table if not exists public.clients (
   due_date       date,
   reference      text,
   is_active      boolean not null default false,
+  status         text,
   created_at     timestamptz not null default now()
 );
 
@@ -64,6 +65,7 @@ alter table public.clients add column if not exists notes          text;
 alter table public.clients add column if not exists due_date       date;
 alter table public.clients add column if not exists reference      text;
 alter table public.clients add column if not exists is_active      boolean not null default false;
+alter table public.clients add column if not exists status         text;
 
 create index if not exists clients_vendor_idx on public.clients(vendor_id);
 create index if not exists clients_zone_idx   on public.clients(zone);

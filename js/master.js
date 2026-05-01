@@ -51,7 +51,6 @@ const CLIENT_COLS = [
   { key: "amount",     label: "Monto",          type: "number", filterable: false, value: (c) => Number(c.amount || 0) },
   { key: "conciliado", label: "Conciliado",     type: "number", filterable: false, value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
   { key: "status",     label: "Estado",         type: "string", filterable: true,  value: (c, ctx) => ctx.statusLabel(c) },
-  { key: "active",     label: "Activo",         type: "string", filterable: true,  value: (c) => c.is_active ? "Activo" : "—" },
   { key: "notes",      label: "Notas",          type: "string", filterable: false, value: (c) => c.notes || "" },
 ];
 
@@ -142,7 +141,7 @@ function buildToolbar(refresh) {
 async function loadAll() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status"),
     sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -473,7 +472,6 @@ function paintDetail(container, vendors, clients, reports, refresh) {
         <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
         <td>${fmtMoney(conciliado)}</td>
         <td><span class="badge ${status.cls}">${status.label}</span></td>
-        <td>${c.is_active ? '<span class="badge ok">Activo</span>' : "—"}</td>
         <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
       const tmpl = document.createElement("template");
       tmpl.innerHTML = fixedHtml.trim();
@@ -1125,8 +1123,17 @@ async function reassignFlow(ids, vendors, refresh) {
   refresh();
 }
 
-// Estado derivado del conciliado vs monto contratado.
+// El status manual del asesor (clients.status) gana sobre el derivado.
 function clientStatus(client, conciliado) {
+  if (client.status) {
+    switch (client.status) {
+      case "Conciliado": return { cls: "ok", label: "Conciliado" };
+      case "Activo":     return { cls: "ok", label: "Activo" };
+      case "Parcial":    return { cls: "partial", label: "Parcial" };
+      case "Pendiente":  return { cls: "pending", label: "Pendiente" };
+      default:           return { cls: "partial", label: client.status };
+    }
+  }
   const monto = Number(client.amount || 0);
   if (monto > 0 && conciliado >= monto) return { cls: "ok", label: "Conciliado" };
   if (conciliado > 0) return { cls: "partial", label: "Parcial" };

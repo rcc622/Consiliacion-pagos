@@ -56,7 +56,7 @@ function headerNode(profile) {
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
     sb.from("clients")
-      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference")
+      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status")
       .order("name"),
     sb.from("payments_report").select("client_id, total_amount, installments, updated_at"),
   ]);
@@ -104,7 +104,6 @@ function paintTable(container, clients, reports, profile, refresh) {
       <th>Monto</th>
       <th>Conciliado</th>
       <th>Estado</th>
-      <th>Activo</th>
       <th>Notas</th>
     </tr>`;
   table.appendChild(thead);
@@ -141,29 +140,36 @@ function rowFor(client, report, profile, refresh) {
   paintRowStatus(badge, client, conciliado);
   tdStatus.appendChild(badge);
 
-  const tdActive = document.createElement("td");
-  if (client.is_active) {
-    const b = document.createElement("span");
-    b.className = "badge ok";
-    b.textContent = "Activo";
-    tdActive.appendChild(b);
-  } else {
-    tdActive.textContent = "—";
-    tdActive.className = "muted";
-  }
-
   const tdNotes = document.createElement("td");
   tdNotes.appendChild(notesEditor(client));
 
-  tr.append(tdName, tdMethod, tdAmount, tdConc, tdStatus, tdActive, tdNotes);
+  tr.append(tdName, tdMethod, tdAmount, tdConc, tdStatus, tdNotes);
   return tr;
 }
 
 function paintRowStatus(el, client, conciliado) {
+  const s = clientEffectiveStatus(client, conciliado);
+  el.className = `badge ${s.cls}`;
+  el.textContent = s.label;
+}
+
+// Si el asesor seteó un status manual, gana sobre el derivado.
+function clientEffectiveStatus(client, conciliado) {
+  if (client.status) return statusBadge(client.status);
   const monto = Number(client.amount || 0);
-  if (monto > 0 && conciliado >= monto) { el.className = "badge ok"; el.textContent = "Conciliado"; return; }
-  if (conciliado > 0) { el.className = "badge partial"; el.textContent = "Parcial"; return; }
-  el.className = "badge pending"; el.textContent = "Pendiente";
+  if (monto > 0 && conciliado >= monto) return { cls: "ok", label: "Conciliado" };
+  if (conciliado > 0) return { cls: "partial", label: "Parcial" };
+  return { cls: "pending", label: "Pendiente" };
+}
+
+function statusBadge(status) {
+  switch (status) {
+    case "Conciliado": return { cls: "ok", label: "Conciliado" };
+    case "Activo":     return { cls: "ok", label: "Activo" };
+    case "Parcial":    return { cls: "partial", label: "Parcial" };
+    case "Pendiente":  return { cls: "pending", label: "Pendiente" };
+    default:           return { cls: "partial", label: status };
+  }
 }
 
 // Textarea inline para notes. Persiste en clients.notes via UPDATE.
@@ -219,7 +225,13 @@ function openClientDetail(client, report, profile, refresh) {
   summary.className = "summary";
   modal.appendChild(summary);
 
-  // Sección informativa: método, enganche, anticipo, activo
+  // Sección informativa: método, enganche, anticipo, estatus.
+  // El subtítulo deja claro que estos campos los completa el asesor.
+  const infoTitle = document.createElement("div");
+  infoTitle.className = "client-info-title";
+  infoTitle.textContent = "El asesor llena estos datos:";
+  modal.appendChild(infoTitle);
+
   const info = document.createElement("div");
   info.className = "client-info-grid";
   modal.appendChild(info);
@@ -306,7 +318,7 @@ function openClientDetail(client, report, profile, refresh) {
       methodPicker(client),
       moneyEditorBlock("Enganche (opc)", client, "enganche"),
       moneyEditorBlock("Anticipo (opc)", client, "anticipo"),
-      activeToggle(client),
+      statusPicker(client),
     );
   }
 
@@ -598,39 +610,41 @@ function moneyEditorBlock(label, client, field) {
   return wrap;
 }
 
-// Botón toggle "Marcar activo / Desmarcar activo".
-function activeToggle(client) {
+// Select de estatus del cliente. Reemplaza al toggle binario "Activo".
+// Persiste en clients.status. Vacío ("Auto") = el badge se deriva del
+// conciliado vs monto.
+const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado"];
+
+function statusPicker(client) {
   const wrap = document.createElement("div");
-  wrap.className = "info-field info-field-action";
+  wrap.className = "info-field";
 
-  const btn = document.createElement("button");
-  btn.type = "button";
+  const span = document.createElement("span");
+  span.textContent = "Estatus";
+  span.className = "info-label";
 
-  function paint() {
-    if (client.is_active) {
-      btn.className = "ghost active-on";
-      btn.textContent = "✓ Activo (click para desmarcar)";
-    } else {
-      btn.className = "";
-      btn.textContent = "Marcar como activo";
-    }
-  }
-  paint();
+  const select = document.createElement("select");
+  select.appendChild(opt("", "Auto"));
+  for (const s of STATUS_OPTIONS) select.appendChild(opt(s, s));
+  select.value = client.status || "";
 
   let saving = false;
-  btn.addEventListener("click", async () => {
+  select.addEventListener("change", async () => {
     if (saving) return;
     saving = true;
-    const next = !client.is_active;
-    const { error } = await sb.from("clients").update({ is_active: next }).eq("id", client.id);
+    const next = select.value || null;
+    const { error } = await sb.from("clients").update({ status: next }).eq("id", client.id);
     saving = false;
-    if (error) { toast(error.message, "error"); return; }
-    client.is_active = next;
-    paint();
-    toast(next ? "Cliente marcado como activo." : "Activo desmarcado.", "success", 1500);
+    if (error) {
+      toast(error.message, "error");
+      select.value = client.status || "";
+      return;
+    }
+    client.status = next;
+    toast(next ? `Estatus: ${next}` : "Estatus en automático", "success", 1500);
   });
 
-  wrap.appendChild(btn);
+  wrap.append(span, select);
   return wrap;
 }
 
