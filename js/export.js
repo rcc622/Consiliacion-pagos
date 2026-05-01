@@ -188,11 +188,35 @@ function exportXLSX(grouped, filename) {
       { wch: 12 }, { wch: 12 }, { wch: 14 },
       { wch: 12 }, { wch: 12 }, { wch: 14 },
     ];
+    applyMoneyFormatting(XLSX, ws);
     XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(vendorGroup.vendorLabel));
   }
 
   XLSX.writeFile(wb, filename);
   toast(`Exportado: ${filename}`, "success");
+}
+
+// Aplica formato moneda ($#,##0.00) a las columnas que llevan $.
+// Base: 2 (Monto), 3 (Conciliado), 7 (Enganche), 10 (Anticipo).
+// MSI: 13, 16, 19, ... (cada 3 cols, los montos de Mens N).
+function applyMoneyFormatting(XLSX, ws) {
+  if (!ws["!ref"]) return;
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  const baseMoneyCols = [2, 3, 7, 10];
+  const fmt = '"$"#,##0.00';
+  for (let row = range.s.r; row <= range.e.r; row++) {
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const isBaseMoney = baseMoneyCols.includes(col);
+      const isMensMoney = col >= 13 && (col - 13) % 3 === 0;
+      if (!isBaseMoney && !isMensMoney) continue;
+      const ref = XLSX.utils.encode_cell({ r: row, c: col });
+      const cell = ws[ref];
+      if (cell && typeof cell.v === "number") {
+        cell.t = "n";
+        cell.z = fmt;
+      }
+    }
+  }
 }
 
 function sanitizeSheetName(name) {
