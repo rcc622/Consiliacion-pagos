@@ -34,9 +34,13 @@ function catalogOptions(catalog, currentValue) {
 }
 
 let selected = new Set();
+let clientFilters = { search: "", vendor_id: "", zone: "" };
+let vendorSort = { col: null, dir: 1 };
 
 export async function renderMaster() {
   selected = new Set();
+  clientFilters = { search: "", vendor_id: "", zone: "" };
+  vendorSort = { col: null, dir: 1 };
   const root = document.getElementById("view-master");
   clear(root);
 
@@ -177,26 +181,74 @@ function paintByVendor(container, vendors, clients, reports) {
     };
   });
 
+  const cols = [
+    { key: "name",     label: "Vendedor",   type: "string" },
+    { key: "zone",     label: "Zona",       type: "string" },
+    { key: "assigned", label: "Asignados",  type: "number" },
+    { key: "reported", label: "Reportados", type: "number" },
+    { key: "pct",      label: "%",          type: "number" },
+    { key: "amount",   label: "Monto",      type: "number" },
+  ];
+
   const table = document.createElement("table");
-  table.innerHTML = `
-    <thead><tr>
-      <th>Vendedor</th><th>Zona</th><th>Asignados</th>
-      <th>Reportados</th><th>%</th><th>Monto</th>
-    </tr></thead>`;
-  const tbody = document.createElement("tbody");
-  for (const r of rows) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(r.name)}</td>
-      <td>${escapeHtml(r.zone)}</td>
-      <td>${r.assigned}</td>
-      <td>${r.reported}</td>
-      <td>${r.pct}%</td>
-      <td>${fmtMoney(r.amount)}</td>`;
-    tbody.appendChild(tr);
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  for (const c of cols) {
+    const th = document.createElement("th");
+    th.className = "sortable";
+    th.dataset.col = c.key;
+    th.dataset.label = c.label;
+    th.onclick = () => {
+      if (vendorSort.col === c.key) vendorSort.dir = -vendorSort.dir;
+      else { vendorSort.col = c.key; vendorSort.dir = c.type === "string" ? 1 : -1; }
+      paintHeader();
+      paintBody();
+    };
+    trh.appendChild(th);
   }
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
   table.appendChild(tbody);
   container.appendChild(table);
+
+  function paintHeader() {
+    for (const th of thead.querySelectorAll("th[data-col]")) {
+      const k = th.dataset.col;
+      const arrow = vendorSort.col === k ? (vendorSort.dir === 1 ? " ▲" : " ▼") : "";
+      th.textContent = th.dataset.label + arrow;
+    }
+  }
+
+  function sortedRows() {
+    if (!vendorSort.col) return rows;
+    const col = cols.find((c) => c.key === vendorSort.col);
+    const dir = vendorSort.dir;
+    return [...rows].sort((a, b) => {
+      const av = a[col.key]; const bv = b[col.key];
+      if (col.type === "string") return String(av).localeCompare(String(bv)) * dir;
+      return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
+    });
+  }
+
+  function paintBody() {
+    clear(tbody);
+    for (const r of sortedRows()) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(r.name)}</td>
+        <td>${escapeHtml(r.zone)}</td>
+        <td>${r.assigned}</td>
+        <td>${r.reported}</td>
+        <td>${r.pct}%</td>
+        <td>${fmtMoney(r.amount)}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  paintHeader();
+  paintBody();
 }
 
 function paintByZone(container, clients, reports) {
@@ -240,6 +292,11 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   const vendorById = new Map(vendors.map((v) => [v.id, v]));
   const reportByClient = new Map(reports.map((r) => [r.client_id, r]));
 
+  // Barra de filtros (búsqueda + vendor + zona). Se construye una sola vez
+  // para no perder el foco del input al re-renderear el tbody.
+  const filterBar = buildClientFilterBar(vendors, clients, () => repaintBody());
+  container.appendChild(filterBar);
+
   // Barra de seleccion (solo se muestra cuando hay >=1 marcado)
   const selBar = document.createElement("div");
   selBar.className = "selection-bar";
@@ -261,7 +318,10 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       <th></th>
     </tr></thead>`;
   const tbody = document.createElement("tbody");
-  const rowChecks = [];
+  tableEl.appendChild(tbody);
+  container.appendChild(tableEl);
+
+  let rowChecks = [];
 
   function repaintSelBar() {
     clear(selBar);
@@ -289,85 +349,132 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     selBar.append(label, reassignBtn, editBtn, delBtn);
   }
 
-  for (const c of clients) {
-    const v = vendorById.get(c.vendor_id);
-    const r = reportByClient.get(c.id);
-    const reported = r && (r.months_paid != null || r.total_amount != null);
-    const tr = document.createElement("tr");
+  function repaintBody() {
+    const filtered = applyClientFilters(clients);
+    clear(tbody);
+    rowChecks = [];
 
-    // Celda checkbox
-    const tdCheck = document.createElement("td");
-    tdCheck.className = "check-col";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = selected.has(c.id);
-    cb.onchange = () => {
-      if (cb.checked) selected.add(c.id);
-      else selected.delete(c.id);
-      repaintSelBar();
-    };
-    rowChecks.push(cb);
-    tdCheck.appendChild(cb);
-    tr.appendChild(tdCheck);
+    for (const c of filtered) {
+      const v = vendorById.get(c.vendor_id);
+      const r = reportByClient.get(c.id);
+      const tr = document.createElement("tr");
 
-    // Resto de columnas
-    const conciliado = Number(r?.total_amount || 0);
-    const status = clientStatus(c, conciliado);
-    const vendorName = v ? (v.full_name || v.email) : "—";
-    const vendorClass = isAsesorPlaceholder(v) ? "vendor-asesor" : "";
-    const fixedHtml = `
-      <td>${escapeHtml(c.name)}</td>
-      <td class="${vendorClass}">${escapeHtml(vendorName)}</td>
-      <td>${escapeHtml(c.payment_method || "—")}</td>
-      <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
-      <td>${fmtMoney(conciliado)}</td>
-      <td><span class="badge ${status.cls}">${status.label}</span></td>
-      <td>${c.is_active ? '<span class="badge ok">Activo</span>' : "—"}</td>
-      <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
-    const tmpl = document.createElement("template");
-    tmpl.innerHTML = fixedHtml.trim();
-    while (tmpl.content.firstChild) tr.appendChild(tmpl.content.firstChild);
+      // Celda checkbox
+      const tdCheck = document.createElement("td");
+      tdCheck.className = "check-col";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = selected.has(c.id);
+      cb.onchange = () => {
+        if (cb.checked) selected.add(c.id);
+        else selected.delete(c.id);
+        repaintSelBar();
+      };
+      rowChecks.push(cb);
+      tdCheck.appendChild(cb);
+      tr.appendChild(tdCheck);
 
-    // Celda acciones (lapiz + reasignar + eliminar)
-    const tdActions = document.createElement("td");
-    tdActions.style.whiteSpace = "nowrap";
+      const conciliado = Number(r?.total_amount || 0);
+      const status = clientStatus(c, conciliado);
+      const vendorName = v ? (v.full_name || v.email) : "—";
+      const vendorClass = isAsesorPlaceholder(v) ? "vendor-asesor" : "";
+      const fixedHtml = `
+        <td>${escapeHtml(c.name)}</td>
+        <td class="${vendorClass}">${escapeHtml(vendorName)}</td>
+        <td>${escapeHtml(c.payment_method || "—")}</td>
+        <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
+        <td>${fmtMoney(conciliado)}</td>
+        <td><span class="badge ${status.cls}">${status.label}</span></td>
+        <td>${c.is_active ? '<span class="badge ok">Activo</span>' : "—"}</td>
+        <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
+      const tmpl = document.createElement("template");
+      tmpl.innerHTML = fixedHtml.trim();
+      while (tmpl.content.firstChild) tr.appendChild(tmpl.content.firstChild);
 
-    const editBtn = document.createElement("button");
-    editBtn.className = "ghost icon-btn";
-    editBtn.title = "Editar cliente";
-    editBtn.textContent = "✏️";
-    editBtn.onclick = () => editClientFlow(c, vendors, refresh);
+      const tdActions = document.createElement("td");
+      tdActions.style.whiteSpace = "nowrap";
 
-    const reassignBtn = document.createElement("button");
-    reassignBtn.className = "ghost icon-btn";
-    reassignBtn.title = "Reasignar vendedor";
-    reassignBtn.textContent = "↩";
-    reassignBtn.onclick = () => reassignFlow([c.id], vendors, refresh);
+      const editBtn = document.createElement("button");
+      editBtn.className = "ghost icon-btn";
+      editBtn.title = "Editar cliente";
+      editBtn.textContent = "✏️";
+      editBtn.onclick = () => editClientFlow(c, vendors, refresh);
 
-    const delBtn = document.createElement("button");
-    delBtn.className = "icon-danger";
-    delBtn.textContent = "Eliminar";
-    delBtn.onclick = () => deleteClientFlow(c, refresh);
+      const reassignBtn = document.createElement("button");
+      reassignBtn.className = "ghost icon-btn";
+      reassignBtn.title = "Reasignar vendedor";
+      reassignBtn.textContent = "↩";
+      reassignBtn.onclick = () => reassignFlow([c.id], vendors, refresh);
 
-    tdActions.append(editBtn, reassignBtn, delBtn);
-    tr.appendChild(tdActions);
+      const delBtn = document.createElement("button");
+      delBtn.className = "icon-danger";
+      delBtn.textContent = "Eliminar";
+      delBtn.onclick = () => deleteClientFlow(c, refresh);
 
-    tbody.appendChild(tr);
+      tdActions.append(editBtn, reassignBtn, delBtn);
+      tr.appendChild(tdActions);
+
+      tbody.appendChild(tr);
+    }
+
+    // El "seleccionar todo" sólo aplica al subset filtrado.
+    const selectAll = tableEl.querySelector('input[data-role="select-all"]');
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.onchange = () => {
+        for (const cb of rowChecks) cb.checked = selectAll.checked;
+        if (selectAll.checked) for (const c of filtered) selected.add(c.id);
+        else for (const c of filtered) selected.delete(c.id);
+        repaintSelBar();
+      };
+    }
   }
-  tableEl.appendChild(tbody);
-  container.appendChild(tableEl);
 
-  // Wire del "seleccionar todo" del header
-  const selectAll = tableEl.querySelector('input[data-role="select-all"]');
-  if (selectAll) {
-    selectAll.onchange = () => {
-      for (const cb of rowChecks) cb.checked = selectAll.checked;
-      selected = new Set(selectAll.checked ? clients.map((c) => c.id) : []);
-      repaintSelBar();
-    };
-  }
-
+  repaintBody();
   repaintSelBar();
+}
+
+function buildClientFilterBar(vendors, clients, onChange) {
+  const bar = document.createElement("div");
+  bar.className = "filter-bar";
+
+  const search = document.createElement("input");
+  search.type = "search";
+  search.placeholder = "Buscar cliente…";
+  search.value = clientFilters.search;
+  search.oninput = () => { clientFilters.search = search.value; onChange(); };
+  bar.appendChild(search);
+
+  const vendorSel = document.createElement("select");
+  vendorSel.appendChild(opt("", "Todos los vendedores"));
+  const vendorsSorted = [...vendors].sort((a, b) =>
+    (a.full_name || a.email).localeCompare(b.full_name || b.email));
+  for (const v of vendorsSorted) {
+    vendorSel.appendChild(opt(v.id, v.full_name || v.email));
+  }
+  vendorSel.value = clientFilters.vendor_id;
+  vendorSel.onchange = () => { clientFilters.vendor_id = vendorSel.value; onChange(); };
+  bar.appendChild(vendorSel);
+
+  const zones = [...new Set(clients.map((c) => c.zone).filter(Boolean))].sort();
+  const zoneSel = document.createElement("select");
+  zoneSel.appendChild(opt("", "Todas las zonas"));
+  for (const z of zones) zoneSel.appendChild(opt(z, z));
+  zoneSel.value = clientFilters.zone;
+  zoneSel.onchange = () => { clientFilters.zone = zoneSel.value; onChange(); };
+  bar.appendChild(zoneSel);
+
+  return bar;
+}
+
+function applyClientFilters(clients) {
+  const search = clientFilters.search.trim().toLowerCase();
+  return clients.filter((c) => {
+    if (clientFilters.vendor_id && c.vendor_id !== clientFilters.vendor_id) return false;
+    if (clientFilters.zone && (c.zone || "") !== clientFilters.zone) return false;
+    if (search && !String(c.name || "").toLowerCase().includes(search)) return false;
+    return true;
+  });
 }
 
 async function editClientFlow(client, vendors, refresh) {

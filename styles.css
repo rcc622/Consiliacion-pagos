@@ -210,7 +210,27 @@ th, td {
   font-size: 13px;
 }
 th { background: var(--bg); font-weight: 600; color: var(--muted); }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
 tr:last-child td { border-bottom: 0; }
+
+.filter-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filter-bar input[type="search"] {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  min-width: 240px;
+  flex: 1;
+}
+.filter-bar select { min-width: 200px; }
 
 td input[type="number"] {
   width: 110px;
