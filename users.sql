@@ -46,11 +46,18 @@ update public.profiles set role='vendor', full_name='Monica Muñiz',    zone='Sa
 update public.profiles set role='vendor', full_name='Elizabeth',       zone='Saltillo'  where email='ventasaltillo1@kenetsolar.com';
 update public.profiles set role='vendor', full_name='Mildred',         zone='Saltillo'  where email='rodolfo@kenetsolar.com';
 
--- Torreón — pendientes: agregar usuarios en Authentication y completar emails.
--- Carolina, Oscar, Javier, Juan, Felipe
+-- Torreón
+update public.profiles set role='vendor', full_name='Brian Muñoz',     zone='Torreón'   where email='ventastrc4@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Carolina Solís Ruiz de Esparza', zone='Torreón' where email='ventastrc3@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Francisco Luna',  zone='Torreón'   where email='ventastrc2@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Juan Martinez',   zone='Torreón'   where email='ventastrc@kenetsolar.com';
+update public.profiles set role='vendor', full_name='David Giacoman',  zone='Torreón'   where email='dgiacoman@electricakenet.com';
+update public.profiles set role='vendor', full_name='Oscar Regalado',  zone='Torreón'   where email='kenetsolaro@gmail.com';
+-- Javier Rodriguez — pendiente: agregar correo cuando lo tengas.
 
--- Monclova — pendientes: agregar usuarios en Authentication y completar emails.
--- Edgar, José Luis
+-- Monclova
+update public.profiles set role='vendor', full_name='Edgar Alvarez',         zone='Monclova'  where email='ventasmva2@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Jose Luis Villarreal',  zone='Monclova'  where email='ventasmva@kenetsolar.com';
 
 -- ---------------------------------------------------------------------
 -- 4) VERIFICACIÓN — corre esto para ver el estado actual.
