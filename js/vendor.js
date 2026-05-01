@@ -358,7 +358,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
     const onChange = () => { refreshSummary(); persist(); };
     info.append(
       methodPicker(client),
-      moneyEditorBlock("Enganche (opc)", client, "enganche", onChange),
+      moneyEditorBlock("Enganche", client, "enganche", onChange),
       moneyEditorBlock("Anticipo (opc)", client, "anticipo", onChange),
       statusPicker(client),
     );

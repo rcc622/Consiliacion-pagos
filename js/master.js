@@ -793,7 +793,7 @@ async function editClientFlow(client, vendors, refresh) {
         options: catalogOptions(METHODS, client.payment_method),
       },
       { name: "amount",   label: "Monto ($)",              type: "number", value: client.amount   ?? "" },
-      { name: "enganche", label: "Enganche ($) — opc",     type: "number", value: client.enganche ?? "" },
+      { name: "enganche", label: "Enganche ($)",     type: "number", value: client.enganche ?? "" },
       { name: "anticipo", label: "Anticipo ($) — opc",     type: "number", value: client.anticipo ?? "" },
     ],
   });
@@ -1125,7 +1125,7 @@ async function addClientFlow(refresh) {
         options: catalogOptions(METHODS, ""),
       },
       { name: "amount",   label: "Monto ($)",          type: "number" },
-      { name: "enganche", label: "Enganche ($) — opc", type: "number" },
+      { name: "enganche", label: "Enganche ($)", type: "number" },
       { name: "anticipo", label: "Anticipo ($) — opc", type: "number" },
     ],
   });
