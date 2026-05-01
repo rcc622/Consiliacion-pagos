@@ -47,15 +47,15 @@ let vendorSort = { col: null, dir: 1 };
 // `type` controla la dirección inicial al hacer click (numérico = desc).
 // `filterable` decide si el header lleva botón ▾.
 const CLIENT_COLS = [
-  { key: "name",       label: "Cliente",        type: "string", filterable: false, value: (c) => c.name || "" },
-  { key: "vendor",     label: "Vendedor",       type: "string", filterable: true,  value: (c, ctx) => ctx.vendorLabel(c) },
-  { key: "method",     label: "Método de pago", type: "string", filterable: true,  value: (c) => c.payment_method || "—" },
-  { key: "amount",     label: "Monto",          type: "number", filterable: false, value: (c) => Number(c.amount || 0) },
-  { key: "enganche",   label: "Enganche",       type: "number", filterable: false, value: (c) => Number(c.enganche || 0) },
-  { key: "anticipo",   label: "Anticipo",       type: "number", filterable: false, value: (c) => Number(c.anticipo || 0) },
-  { key: "conciliado", label: "Conciliado",     type: "number", filterable: false, value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
-  { key: "status",     label: "Estado",         type: "string", filterable: true,  value: (c, ctx) => ctx.statusLabel(c) },
-  { key: "notes",      label: "Notas",          type: "string", filterable: false, value: (c) => c.notes || "" },
+  { key: "name",       label: "Cliente",        type: "string", filterable: true, value: (c) => c.name || "" },
+  { key: "vendor",     label: "Vendedor",       type: "string", filterable: true, value: (c, ctx) => ctx.vendorLabel(c) },
+  { key: "method",     label: "Método de pago", type: "string", filterable: true, value: (c) => c.payment_method || "—" },
+  { key: "amount",     label: "Monto",          type: "number", filterable: true, value: (c) => Number(c.amount || 0) },
+  { key: "enganche",   label: "Enganche",       type: "number", filterable: true, value: (c) => Number(c.enganche || 0) },
+  { key: "anticipo",   label: "Anticipo",       type: "number", filterable: true, value: (c) => Number(c.anticipo || 0) },
+  { key: "conciliado", label: "Conciliado",     type: "number", filterable: true, value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
+  { key: "status",     label: "Estado",         type: "string", filterable: true, value: (c, ctx) => ctx.statusLabel(c) },
+  { key: "notes",      label: "Notas",          type: "string", filterable: true, value: (c) => c.notes || "" },
 ];
 
 const FILTERABLE_COLS = CLIENT_COLS.filter((c) => c.filterable);
@@ -678,10 +678,20 @@ function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
   list.className = "popover-list";
   pop.appendChild(list);
 
+  function displayVal(v) {
+    if (isNumeric) return v ? fmtMoney(v) : "—";
+    if (v === "" || v == null) return "—";
+    return String(v);
+  }
+
   function renderList() {
     clear(list);
     const q = search.value.trim().toLowerCase();
-    const visible = q ? values.filter((v) => String(v).toLowerCase().includes(q)) : values;
+    const visible = q ? values.filter((v) => {
+      const raw = String(v).toLowerCase();
+      const disp = displayVal(v).toLowerCase();
+      return raw.includes(q) || disp.includes(q);
+    }) : values;
     for (const val of visible) {
       const row = document.createElement("label");
       row.className = "popover-row";
@@ -694,7 +704,7 @@ function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
         renderList();
       };
       const txt = document.createElement("span");
-      txt.textContent = val;
+      txt.textContent = displayVal(val);
       row.append(cb, txt);
       list.appendChild(row);
     }
