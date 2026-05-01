@@ -178,13 +178,16 @@ create policy clients_master_all on public.clients
   for all using (public.current_user_role() = 'master')
   with check (public.current_user_role() = 'master');
 
--- payments_report: vendor lee/escribe lo suyo; master lee todo.
+-- payments_report: vendor lee/escribe lo suyo; master lee/escribe todo
+-- (master puede entrar al modal de cualquier cliente y editar capturas).
 drop policy if exists pr_vendor_rw     on public.payments_report;
 drop policy if exists pr_master_select on public.payments_report;
+drop policy if exists pr_master_all    on public.payments_report;
 
 create policy pr_vendor_rw on public.payments_report
   for all using (vendor_id = auth.uid())
   with check (vendor_id = auth.uid());
 
-create policy pr_master_select on public.payments_report
-  for select using (public.current_user_role() = 'master');
+create policy pr_master_all on public.payments_report
+  for all using (public.current_user_role() = 'master')
+  with check (public.current_user_role() = 'master');

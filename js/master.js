@@ -4,6 +4,8 @@ import { sb } from "./supabase.js";
 import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
 import { parseFile, importRows } from "./import.js";
 import { exportConciliation } from "./export.js";
+import { openClientDetail } from "./vendor.js";
+import { getProfile } from "./auth.js";
 
 const ZONES = [
   "Monterrey","Saltillo","Chihuahua","MTY Foraneo","FORANEO","COMERCIAL MTY",
@@ -465,8 +467,21 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       const status = clientStatus(c, conciliado);
       const vendorName = v ? (v.full_name || v.email) : "—";
       const vendorClass = isAsesorPlaceholder(v) ? "vendor-asesor" : "";
+
+      // Cliente: link clickeable que abre el modal en modo vista por defecto.
+      const tdName = document.createElement("td");
+      const link = document.createElement("a");
+      link.href = "#";
+      link.className = "row-link";
+      link.textContent = c.name;
+      link.onclick = (ev) => {
+        ev.preventDefault();
+        openClientDetail(c, r, getProfile(), refresh, "view");
+      };
+      tdName.appendChild(link);
+      tr.appendChild(tdName);
+
       const fixedHtml = `
-        <td>${escapeHtml(c.name)}</td>
         <td class="${vendorClass}">${escapeHtml(vendorName)}</td>
         <td>${escapeHtml(c.payment_method || "—")}</td>
         <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>

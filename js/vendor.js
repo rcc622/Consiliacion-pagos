@@ -209,17 +209,43 @@ function notesEditor(client) {
 
 // === Modal de detalle =======================================================
 
-function openClientDetail(client, report, profile, refresh) {
+// `mode` controla si el modal arranca editable o read-only. El usuario puede
+// alternar con el toggle en el header. Default "edit" para vendedores;
+// master pasa "view" para ver lo que captura el asesor sin tocar nada.
+export function openClientDetail(client, report, profile, refresh, mode = "edit") {
+  let currentMode = mode;
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
 
   const modal = document.createElement("div");
   modal.className = "modal detail-modal";
 
-  // Título
+  // Título con toggle de modo
+  const header = document.createElement("div");
+  header.className = "detail-header";
   const h = document.createElement("h2");
   h.textContent = client.name;
-  modal.appendChild(h);
+  const modeBtn = document.createElement("button");
+  modeBtn.type = "button";
+  modeBtn.className = "mode-toggle";
+  modeBtn.dataset.role = "mode-toggle";
+  modeBtn.addEventListener("click", () => {
+    currentMode = currentMode === "view" ? "edit" : "view";
+    paintMode();
+  });
+  header.append(h, modeBtn);
+  modal.appendChild(header);
+
+  function paintMode() {
+    if (currentMode === "view") {
+      modeBtn.textContent = "🔒 Vista — click para editar";
+      modeBtn.classList.remove("on");
+    } else {
+      modeBtn.textContent = "✏️ Edición — click para solo ver";
+      modeBtn.classList.add("on");
+    }
+    applyModeToModal(modal, currentMode);
+  }
 
   // Stats (Total / Conciliado / Pte conciliar / Pagos)
   const summary = document.createElement("div");
@@ -245,7 +271,7 @@ function openClientDetail(client, report, profile, refresh) {
   payTitle.className = "pay-title";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
-  addBtn.className = "ghost";
+  addBtn.className = "ghost add-row-btn";
   addBtn.textContent = "+ Agregar fila";
   payHead.append(payTitle, addBtn);
   modal.appendChild(payHead);
@@ -305,7 +331,7 @@ function openClientDetail(client, report, profile, refresh) {
 
     return sb.from("payments_report").upsert({
       client_id: client.id,
-      vendor_id: profile.id,
+      vendor_id: client.vendor_id || profile.id,
       months_paid: installments.length,
       total_amount: totalPaid,
       installments,
@@ -397,6 +423,7 @@ function openClientDetail(client, report, profile, refresh) {
       });
     }
     paintPagination();
+    applyModeToModal(modal, currentMode);
   }
 
   function buildRow(r, displayIdx) {
@@ -432,7 +459,7 @@ function openClientDetail(client, report, profile, refresh) {
     const tdDel = document.createElement("td");
     const delBtn = document.createElement("button");
     delBtn.type = "button";
-    delBtn.className = "icon-danger";
+    delBtn.className = "icon-danger row-delete-btn";
     delBtn.title = "Borrar fila";
     delBtn.textContent = "✕";
     tdDel.appendChild(delBtn);
@@ -505,6 +532,7 @@ function openClientDetail(client, report, profile, refresh) {
     if (pageSize !== Infinity) currentPage = totalPages();
     renderPage();
     refreshSummary();
+    applyModeToModal(modal, currentMode);
   });
 
   renderPage();
@@ -523,9 +551,25 @@ function openClientDetail(client, report, profile, refresh) {
   backdrop.appendChild(modal);
   document.body.appendChild(backdrop);
 
+  // Aplicar modo inicial una vez que todos los elementos están en el DOM.
+  paintMode();
+
   backdrop.addEventListener("click", (ev) => {
     if (ev.target === backdrop) { backdrop.remove(); refresh(); }
   });
+}
+
+// Habilita / deshabilita inputs y oculta botones según modo.
+function applyModeToModal(modal, mode) {
+  const view = mode === "view";
+  modal.classList.toggle("view-mode", view);
+  for (const el of modal.querySelectorAll("input, select, textarea")) {
+    if (el.closest("[data-role=mode-toggle]")) continue;
+    el.disabled = view;
+  }
+  for (const el of modal.querySelectorAll(".add-row-btn, .row-delete-btn")) {
+    el.style.display = view ? "none" : "";
+  }
 }
 
 // Editor inline para método de pago (informativo, no afecta cálculos).
