@@ -541,6 +541,17 @@ td.vendor-asesor {
   margin-top: 2px;
 }
 .client-info-grid .info-sub.warn { color: var(--warning); }
+.client-info-grid .info-link-btn {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: inherit;
+}
+.client-info-grid .info-link-btn:hover { color: var(--primary-hover); }
 .client-info-grid .field-na input,
 .client-info-grid .field-na select {
   background: var(--bg);

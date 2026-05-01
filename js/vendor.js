@@ -647,6 +647,7 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
   const dateField = `${field}_date`;
 
   function paint() {
+    while (sub.firstChild) sub.removeChild(sub.firstChild);
     sub.classList.remove("warn");
     if (client[formField] === "N/A") {
       input.value = "";
@@ -662,10 +663,33 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
     if (v && client[formField] && client[dateField]) {
       sub.textContent = `${client[formField]} · ${formatDate(client[dateField])}`;
     } else if (v) {
-      sub.textContent = "Falta fecha / forma";
       sub.classList.add("warn");
-    } else {
-      sub.textContent = "";
+      const txt = document.createElement("span");
+      txt.textContent = "Falta fecha / forma · ";
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "info-link-btn";
+      link.textContent = "capturar";
+      link.onclick = async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const data = await askPaymentDetails({
+          title: `${label}: ${fmtMoney(v)}`,
+          defaultForm: client[formField] || "",
+          defaultDate: client[dateField] || "",
+        });
+        if (!data) return;
+        const { error } = await sb.from("clients")
+          .update({ [formField]: data.form, [dateField]: data.date })
+          .eq("id", client.id);
+        if (error) { toast(error.message, "error"); return; }
+        client[formField] = data.form;
+        client[dateField] = data.date;
+        paint();
+        onChange();
+        toast("Guardado.", "success", 1500);
+      };
+      sub.append(txt, link);
     }
   }
   paint();
