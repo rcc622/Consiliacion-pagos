@@ -437,24 +437,19 @@ td textarea.notes-editor:focus {
 td.notes-cell {
   max-width: 280px;
   color: var(--muted);
-  vertical-align: middle;
-}
-td.notes-cell .notes-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  vertical-align: top;
 }
 td.notes-cell .notes-text {
-  flex: 1;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-td.notes-cell.expanded .notes-row { display: block; }
-td.notes-cell.expanded .notes-text {
   white-space: normal;
   word-break: break-word;
+}
+td.notes-cell.expanded .notes-text {
+  display: block;
+  -webkit-line-clamp: unset;
 }
 td.notes-cell .notes-toggle {
   background: transparent;
@@ -462,10 +457,9 @@ td.notes-cell .notes-toggle {
   color: var(--primary);
   cursor: pointer;
   padding: 0;
+  margin-top: 2px;
   font-size: 12px;
   font-weight: 500;
-  flex: none;
-  white-space: nowrap;
 }
 td.notes-cell .notes-toggle:hover { text-decoration: underline; }
 
@@ -552,6 +546,26 @@ td.vendor-asesor {
   background: var(--bg);
   color: var(--muted);
   font-style: italic;
+}
+.client-info-grid .info-field-full {
+  grid-column: 1 / -1;
+}
+.client-info-grid .modal-notes-editor {
+  font: inherit;
+  width: 100%;
+  min-height: 60px;
+  max-height: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+}
+.client-info-grid .modal-notes-editor:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+  border-color: var(--primary);
 }
 
 /* Forma apilada para mini-modales */

@@ -1140,8 +1140,7 @@ async function addClientFlow(refresh) {
   refresh();
 }
 
-// Celda de notas con truncado a 1 línea + botón Ver/Ocultar si el texto
-// se pasa. Mantiene la fila a altura estándar.
+// Celda de notas con truncado a 3 líneas + "ver más" debajo cuando aplica.
 function buildNotesCell(notes) {
   const td = document.createElement("td");
   td.className = "notes-cell";
@@ -1149,25 +1148,24 @@ function buildNotesCell(notes) {
     td.textContent = "—";
     return td;
   }
-  const wrap = document.createElement("span");
-  wrap.className = "notes-row";
-  const text = document.createElement("span");
+  const text = document.createElement("div");
   text.className = "notes-text";
   text.textContent = notes;
-  wrap.appendChild(text);
-  if (notes.length > 30) {
+  td.appendChild(text);
+  // Heurística: si hay > 80 chars probablemente ocupa más de 3 líneas
+  // a 280px de ancho. Mostramos toggle.
+  if (notes.length > 80) {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "notes-toggle";
-    toggle.textContent = "Ver";
+    toggle.textContent = "ver más";
     toggle.onclick = (ev) => {
       ev.stopPropagation();
       const expanded = td.classList.toggle("expanded");
-      toggle.textContent = expanded ? "Ocultar" : "Ver";
+      toggle.textContent = expanded ? "ver menos" : "ver más";
     };
-    wrap.appendChild(toggle);
+    td.appendChild(toggle);
   }
-  td.appendChild(wrap);
   return td;
 }
 

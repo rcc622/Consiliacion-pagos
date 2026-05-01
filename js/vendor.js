@@ -361,6 +361,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       moneyEditorBlock("Enganche", client, "enganche", onChange),
       moneyEditorBlock("Anticipo (opc)", client, "anticipo", onChange),
       statusPicker(client),
+      notesEditorBlock(client),
     );
   }
 
@@ -737,6 +738,45 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
 // Persiste en clients.status. Vacío ("Auto") = el badge se deriva del
 // conciliado vs monto.
 const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado"];
+
+// Notas dentro del modal del cliente. Ocupa el ancho completo del grid.
+// Persiste al perder foco (igual que el editor de la tabla del vendor).
+function notesEditorBlock(client) {
+  const wrap = document.createElement("label");
+  wrap.className = "info-field info-field-full";
+  const span = document.createElement("span");
+  span.className = "info-label";
+  span.textContent = "Notas";
+  const ta = document.createElement("textarea");
+  ta.className = "modal-notes-editor";
+  ta.placeholder = "Notas del cliente…";
+  ta.rows = 2;
+  ta.value = client.notes || "";
+
+  let saving = false;
+  ta.addEventListener("blur", async () => {
+    if (saving) return;
+    const next = ta.value.trim() || null;
+    if ((client.notes ?? null) === (next ?? null)) return;
+    saving = true;
+    const { error } = await sb.from("clients").update({ notes: next }).eq("id", client.id);
+    saving = false;
+    if (error) {
+      toast(error.message, "error");
+      ta.value = client.notes || "";
+      return;
+    }
+    client.notes = next;
+    toast("Notas guardadas.", "success", 1500);
+  });
+
+  ta.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ta.value = client.notes || ""; ta.blur(); }
+  });
+
+  wrap.append(span, ta);
+  return wrap;
+}
 
 function statusPicker(client) {
   const wrap = document.createElement("div");
