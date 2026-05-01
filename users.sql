@@ -32,30 +32,25 @@ update public.profiles set role='master', full_name='Roberto Laguna'
 -- ---------------------------------------------------------------------
 
 -- Monterrey
-update public.profiles set role='vendor', full_name='Aarón',     zone='Monterrey' where email='aaron@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Miguel',    zone='Monterrey' where email='miguel@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Said',      zone='Monterrey' where email='said@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Mara',      zone='Monterrey' where email='mara@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Carlos',    zone='Monterrey' where email='carlos@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Yazmín',    zone='Monterrey' where email='yazmin@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Gaby',      zone='Monterrey' where email='gaby@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Samuel',    zone='Monterrey' where email='samuel@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Aaron',           zone='Monterrey' where email='btnhlopez@gmail.com';
+update public.profiles set role='vendor', full_name='Miguel',          zone='Monterrey' where email='cambaceo1@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Said Ceron',      zone='Monterrey' where email='ventasmty4@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Mara',            zone='Monterrey' where email='ventas@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Carlos',          zone='Monterrey' where email='elisa@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Yazmin',          zone='Monterrey' where email='humberto@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Samuel Giacoman', zone='Monterrey' where email='samuel@kenetsolar.com';
+-- Gaby — pendiente: agregar usuario en Authentication y completar email aquí.
 
 -- Saltillo
-update public.profiles set role='vendor', full_name='Mónica',    zone='Saltillo'  where email='monica@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Elizabeth', zone='Saltillo'  where email='elizabeth@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Mildred',   zone='Saltillo'  where email='ventasaltillo1@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Monica Muñiz',    zone='Saltillo'  where email='monica@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Elizabeth',       zone='Saltillo'  where email='ventasaltillo1@kenetsolar.com';
+update public.profiles set role='vendor', full_name='Mildred',         zone='Saltillo'  where email='rodolfo@kenetsolar.com';
 
--- Torreón
-update public.profiles set role='vendor', full_name='Carolina',  zone='Torreón'   where email='carolina@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Oscar',     zone='Torreón'   where email='oscar@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Javier',    zone='Torreón'   where email='javier@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Juan',      zone='Torreón'   where email='juan@kenetsolar.com';
-update public.profiles set role='vendor', full_name='Felipe',    zone='Torreón'   where email='felipe@kenetsolar.com';
+-- Torreón — pendientes: agregar usuarios en Authentication y completar emails.
+-- Carolina, Oscar, Javier, Juan, Felipe
 
--- Monclova
-update public.profiles set role='vendor', full_name='Edgar',     zone='Monclova'  where email='edgar@kenetsolar.com';
-update public.profiles set role='vendor', full_name='José Luis', zone='Monclova'  where email='joseluis@kenetsolar.com';
+-- Monclova — pendientes: agregar usuarios en Authentication y completar emails.
+-- Edgar, José Luis
 
 -- ---------------------------------------------------------------------
 -- 4) VERIFICACIÓN — corre esto para ver el estado actual.
