@@ -995,25 +995,38 @@ async function triggerImport(refresh) {
   const params = await openImportModal(vendors);
   if (!params) return;
 
-  try {
-    const rows = await parseFile(params.file);
-    if (!rows.length) { toast("El archivo no tiene filas válidas.", "error"); return; }
-    const { inserted, updated, skipped, errors } = await importRows(rows, params.defaults);
-    const parts = [];
-    if (inserted) parts.push(`Insertados: ${inserted}`);
-    if (updated)  parts.push(`Actualizados: ${updated}`);
-    if (skipped)  parts.push(`Omitidos (suma 0): ${skipped}`);
-    if (errors.length) parts.push(`Errores: ${errors.length}`);
-    toast(parts.join(" · ") || "Sin cambios.", errors.length ? "info" : "success");
-    if (errors.length) {
-      for (const e of errors.slice(0, 5)) {
-        toast(`${e.row.cliente || e.row.contacto || e.row.name || "(sin nombre)"} → ${e.reason}`, "error", 5000);
+  let totals = { inserted: 0, updated: 0, skipped: 0, errors: [] };
+  for (const file of params.files) {
+    try {
+      const rows = await parseFile(file);
+      if (!rows.length) {
+        toast(`${file.name}: sin filas válidas.`, "error", 4000);
+        continue;
       }
+      const res = await importRows(rows, params.defaults);
+      totals.inserted += res.inserted || 0;
+      totals.updated  += res.updated  || 0;
+      totals.skipped  += res.skipped  || 0;
+      if (res.errors?.length) {
+        for (const e of res.errors) totals.errors.push({ ...e, file: file.name });
+      }
+    } catch (e) {
+      toast(`${file.name}: ${e.message || e}`, "error", 5000);
     }
-    refresh();
-  } catch (e) {
-    toast(`Import falló: ${e.message || e}`, "error");
   }
+
+  const parts = [];
+  if (params.files.length > 1) parts.push(`${params.files.length} archivos`);
+  if (totals.inserted) parts.push(`Insertados: ${totals.inserted}`);
+  if (totals.updated)  parts.push(`Actualizados: ${totals.updated}`);
+  if (totals.skipped)  parts.push(`Omitidos (suma 0): ${totals.skipped}`);
+  if (totals.errors.length) parts.push(`Errores: ${totals.errors.length}`);
+  toast(parts.join(" · ") || "Sin cambios.", totals.errors.length ? "info" : "success");
+  for (const e of totals.errors.slice(0, 5)) {
+    const who = e.row.cliente || e.row.contacto || e.row.name || "(sin nombre)";
+    toast(`${e.file ? e.file + " · " : ""}${who} → ${e.reason}`, "error", 5000);
+  }
+  refresh();
 }
 
 function openImportModal(vendors) {
@@ -1037,13 +1050,19 @@ function openImportModal(vendors) {
     const form = document.createElement("form");
 
     const fileLabel = document.createElement("label");
-    fileLabel.textContent = "Archivo CSV / Excel";
+    fileLabel.textContent = "Archivo(s) CSV / Excel";
     const fileInput = document.createElement("input");
     fileInput.type = "file";
     fileInput.accept = ".csv,.xlsx,.xls";
+    fileInput.multiple = true;
     fileInput.required = true;
     fileLabel.appendChild(fileInput);
     form.appendChild(fileLabel);
+
+    const fileHint = document.createElement("small");
+    fileHint.className = "muted";
+    fileHint.textContent = "Puedes seleccionar varios archivos a la vez (Ctrl/Cmd + click).";
+    form.appendChild(fileHint);
 
     const vendorLabel = document.createElement("label");
     vendorLabel.textContent = "Vendedor (aplica a todos)";
@@ -1076,11 +1095,11 @@ function openImportModal(vendors) {
 
     form.onsubmit = (ev) => {
       ev.preventDefault();
-      const file = fileInput.files?.[0];
-      if (!file) return;
+      const files = Array.from(fileInput.files || []);
+      if (!files.length) return;
       backdrop.remove();
       resolve({
-        file,
+        files,
         defaults: { vendor_id: vendorSelect.value || null },
       });
     };
