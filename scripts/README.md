@@ -42,3 +42,25 @@ Listo. Comparte la password temporal con cada usuario: Cambiame123!
 
 Cada usuario se crea con la password temporal definida en el script. Diles
 que la cambien al primer login.
+
+## reset-passwords.mjs
+
+Cambia el password de usuarios ya creados en Authentication. Útil cuando
+te equivocaste capturándolos y no quieres borrarlos.
+
+### Cómo correrlo
+
+1. Edita la lista `RESETS` en `reset-passwords.mjs`:
+   ```js
+   const RESETS = [
+     { email: "usuario1@kenetsolar.com", password: "NuevaPass123!" },
+     { email: "usuario2@kenetsolar.com", password: "OtraPass456!" },
+   ];
+   ```
+2. Exporta credenciales y corre:
+   ```bash
+   export SUPABASE_URL="https://xxxxx.supabase.co"
+   export SUPABASE_SERVICE_ROLE="eyJ..."
+   node reset-passwords.mjs
+   ```
+3. Comparte la nueva password con cada usuario.
