@@ -218,19 +218,125 @@ tr:last-child td { border-bottom: 0; }
   display: flex;
   gap: 12px;
   margin-bottom: 12px;
-  flex-wrap: wrap;
   align-items: center;
+}
+.filter-bar .search-input {
+  position: relative;
+  flex: 1;
+  max-width: 360px;
+}
+.filter-bar .search-input .search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  pointer-events: none;
+  opacity: 0.6;
 }
 .filter-bar input[type="search"] {
   font: inherit;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 32px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
-  min-width: 240px;
-  flex: 1;
+  width: 100%;
 }
-.filter-bar select { min-width: 200px; }
+.filter-bar input[type="search"]:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+  border-color: var(--primary);
+}
+
+/* Headers filtrables: label + botón ▾ */
+table.filterable th { padding-top: 8px; padding-bottom: 8px; }
+.th-filterable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.th-filter-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.th-filter-btn:hover {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+.th-filter-btn.active {
+  background: #dbeafe;
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Popover de filtro */
+.filter-popover {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
+  padding: 10px;
+  z-index: 150;
+  min-width: 240px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.filter-popover .popover-search {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.filter-popover .popover-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 4px;
+}
+.filter-popover .popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.filter-popover .popover-row:hover { background: var(--bg); }
+.filter-popover .popover-all {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  font-weight: 600;
+}
+.filter-popover .popover-empty {
+  font-size: 12px;
+  padding: 8px;
+  text-align: center;
+}
+.filter-popover .popover-footer {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+.filter-popover .popover-footer button {
+  padding: 4px 10px;
+  font-size: 13px;
+}
 
 td input[type="number"] {
   width: 110px;
