@@ -24,12 +24,18 @@ export async function initAuth() {
   const { data: { session } } = await sb.auth.getSession();
   await routeFor(session);
 
-  // Solo re-ruteamos en cambios reales de sesion. TOKEN_REFRESHED ocurre
-  // cuando la pestana vuelve al foco y rompe la vista (la deja en
-  // "Cargando..." indefinidamente).
+  // Solo re-ruteamos en cambios reales de sesión. TOKEN_REFRESHED y los
+  // SIGNED_IN repetidos (que algunos navegadores disparan en cada token
+  // refresh / cambio de foco) tiraban la vista de master a "Cargando…"
+  // y reseteaban la UI cada ~minuto.
   sb.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
-      routeFor(session);
+    if (event === "SIGNED_OUT") {
+      routeFor(null);
+      return;
+    }
+    if (event === "SIGNED_IN") {
+      const sameUser = currentProfile && currentProfile.id === session?.user?.id;
+      if (!sameUser) routeFor(session);
     }
   });
 }

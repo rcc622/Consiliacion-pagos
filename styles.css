@@ -280,23 +280,81 @@ table.filterable th.sortable:hover .th-label { color: var(--text); }
   color: var(--primary);
 }
 
-/* Popover de filtro */
+/* Popover de filtro estilo Google Sheets */
 .filter-popover {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
-  padding: 10px;
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18);
+  padding: 0;
   z-index: 150;
-  min-width: 240px;
-  max-width: 320px;
+  min-width: 280px;
+  max-width: 340px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
+  overflow: hidden;
+}
+.filter-popover .popover-sort {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+.filter-popover .popover-link {
+  background: transparent;
+  border: 0;
+  padding: 8px 14px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.filter-popover .popover-link:hover { background: var(--bg); }
+.filter-popover .popover-link-icon {
+  font-size: 14px;
+  width: 14px;
+  text-align: center;
+  color: var(--muted);
+}
+.filter-popover .popover-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px 4px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.filter-popover .popover-link-text {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+.filter-popover .popover-link-text:hover { text-decoration: underline; }
+.filter-popover .popover-count {
+  margin-left: auto;
+  font-size: 12px;
+}
+.filter-popover .popover-search-wrap {
+  position: relative;
+  padding: 4px 14px 8px;
+}
+.filter-popover .popover-search-icon {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0.6;
 }
 .filter-popover .popover-search {
   font: inherit;
-  padding: 6px 8px;
+  width: 100%;
+  padding: 6px 8px 6px 28px;
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -306,7 +364,7 @@ table.filterable th.sortable:hover .th-label { color: var(--text); }
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-right: 4px;
+  padding: 0 14px 4px;
 }
 .filter-popover .popover-row {
   display: flex;
@@ -332,11 +390,6 @@ table.filterable th.sortable:hover .th-label { color: var(--text); }
   white-space: nowrap;
 }
 .filter-popover .popover-row:hover { background: var(--bg); }
-.filter-popover .popover-all {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 6px;
-  font-weight: 600;
-}
 .filter-popover .popover-empty {
   font-size: 12px;
   padding: 8px;
@@ -347,11 +400,10 @@ table.filterable th.sortable:hover .th-label { color: var(--text); }
   gap: 6px;
   justify-content: flex-end;
   border-top: 1px solid var(--border);
-  padding-top: 8px;
-  margin-top: 2px;
+  padding: 8px 14px;
 }
 .filter-popover .popover-footer button {
-  padding: 4px 10px;
+  padding: 5px 14px;
   font-size: 13px;
 }
 
@@ -463,6 +515,20 @@ td.vendor-asesor {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.client-info-grid .info-sub {
+  font-size: 11px;
+  margin-top: 2px;
+}
+.client-info-grid .info-sub.warn { color: var(--warning); }
+.client-info-grid .field-na input,
+.client-info-grid .field-na select {
+  background: var(--bg);
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Forma apilada para mini-modales */
+.modal .stacked-form { display: flex; flex-direction: column; gap: 10px; }
 .client-info-grid .info-field-action { justify-content: flex-end; }
 .client-info-grid .info-field-action button { padding: 6px 10px; }
 .client-info-grid .info-field-action button.active-on {

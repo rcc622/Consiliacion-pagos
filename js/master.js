@@ -51,6 +51,8 @@ const CLIENT_COLS = [
   { key: "vendor",     label: "Vendedor",       type: "string", filterable: true,  value: (c, ctx) => ctx.vendorLabel(c) },
   { key: "method",     label: "Método de pago", type: "string", filterable: true,  value: (c) => c.payment_method || "—" },
   { key: "amount",     label: "Monto",          type: "number", filterable: false, value: (c) => Number(c.amount || 0) },
+  { key: "enganche",   label: "Enganche",       type: "number", filterable: false, value: (c) => Number(c.enganche || 0) },
+  { key: "anticipo",   label: "Anticipo",       type: "number", filterable: false, value: (c) => Number(c.anticipo || 0) },
   { key: "conciliado", label: "Conciliado",     type: "number", filterable: false, value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
   { key: "status",     label: "Estado",         type: "string", filterable: true,  value: (c, ctx) => ctx.statusLabel(c) },
   { key: "notes",      label: "Notas",          type: "string", filterable: false, value: (c) => c.notes || "" },
@@ -59,11 +61,10 @@ const CLIENT_COLS = [
 const FILTERABLE_COLS = CLIENT_COLS.filter((c) => c.filterable);
 
 export async function renderMaster() {
+  // selected sí se resetea (ids podrían quedar stale tras refetch).
+  // Filtros, búsqueda y sort PERSISTEN entre re-renders para que el master
+  // pueda auditar sin perder contexto cuando se actualizan datos.
   selected = new Set();
-  clientSearch = "";
-  columnFilters = {};
-  clientSort = { col: null, dir: 1 };
-  vendorSort = { col: null, dir: 1 };
   const root = document.getElementById("view-master");
   clear(root);
 
@@ -143,7 +144,7 @@ function buildToolbar(refresh) {
 async function loadAll() {
   const [vendorsRes, clientsRes, reportsRes] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status"),
+    sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date"),
     sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at"),
   ]);
 
@@ -485,6 +486,8 @@ function paintDetail(container, vendors, clients, reports, refresh) {
         <td class="${vendorClass}">${escapeHtml(vendorName)}</td>
         <td>${escapeHtml(c.payment_method || "—")}</td>
         <td>${c.amount != null ? fmtMoney(c.amount) : "—"}</td>
+        <td>${Number(c.enganche || 0) > 0 ? fmtMoney(c.enganche) : "—"}</td>
+        <td>${Number(c.anticipo || 0) > 0 ? fmtMoney(c.anticipo) : "—"}</td>
         <td>${fmtMoney(conciliado)}</td>
         <td><span class="badge ${status.cls}">${status.label}</span></td>
         <td class="notes-cell">${c.notes ? escapeHtml(c.notes) : "—"}</td>`;
@@ -593,8 +596,11 @@ function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
   // Cerrar otros popovers abiertos
   document.querySelectorAll(".filter-popover").forEach((p) => p.remove());
 
+  const isNumeric = col.type === "number";
   const values = [...new Set(clients.map((c) => col.value(c, ctx)))]
-    .sort((a, b) => String(a).localeCompare(String(b)));
+    .sort((a, b) => isNumeric
+      ? (Number(a) || 0) - (Number(b) || 0)
+      : String(a).localeCompare(String(b)));
 
   const current = columnFilters[col.key];
   const selected = new Set(current || values);
@@ -602,23 +608,70 @@ function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
   const pop = document.createElement("div");
   pop.className = "filter-popover";
 
-  // Header: search dentro del popover
+  // Acciones de orden (estilo Google Sheets) — al hacer click, ordenan la
+  // tabla por esta columna y cierran el popover.
+  const sortHead = document.createElement("div");
+  sortHead.className = "popover-sort";
+  const sortAsc = document.createElement("button");
+  sortAsc.type = "button";
+  sortAsc.className = "popover-link";
+  sortAsc.innerHTML = isNumeric
+    ? `<span class="popover-link-icon">↑</span> Ordenar de menor a mayor`
+    : `<span class="popover-link-icon">↑</span> Ordenar A → Z`;
+  sortAsc.onclick = () => {
+    clientSort.col = col.key;
+    clientSort.dir = 1;
+    pop.remove();
+    onChange();
+  };
+  const sortDesc = document.createElement("button");
+  sortDesc.type = "button";
+  sortDesc.className = "popover-link";
+  sortDesc.innerHTML = isNumeric
+    ? `<span class="popover-link-icon">↓</span> Ordenar de mayor a menor`
+    : `<span class="popover-link-icon">↓</span> Ordenar Z → A`;
+  sortDesc.onclick = () => {
+    clientSort.col = col.key;
+    clientSort.dir = -1;
+    pop.remove();
+    onChange();
+  };
+  sortHead.append(sortAsc, sortDesc);
+  pop.appendChild(sortHead);
+
+  // Toolbar: links "Seleccionar todo · Borrar" + contador
+  const toolbar = document.createElement("div");
+  toolbar.className = "popover-toolbar";
+  const selAll = document.createElement("a");
+  selAll.href = "#";
+  selAll.className = "popover-link-text";
+  selAll.textContent = "Seleccionar todo";
+  selAll.onclick = (ev) => { ev.preventDefault(); for (const v of values) selected.add(v); renderList(); };
+  const dot = document.createElement("span");
+  dot.className = "muted";
+  dot.textContent = " · ";
+  const clearAll = document.createElement("a");
+  clearAll.href = "#";
+  clearAll.className = "popover-link-text";
+  clearAll.textContent = "Borrar";
+  clearAll.onclick = (ev) => { ev.preventDefault(); selected.clear(); renderList(); };
+  const count = document.createElement("span");
+  count.className = "popover-count muted";
+  toolbar.append(selAll, dot, clearAll, count);
+  pop.appendChild(toolbar);
+
+  // Search
+  const searchWrap = document.createElement("div");
+  searchWrap.className = "popover-search-wrap";
+  const searchIcon = document.createElement("span");
+  searchIcon.className = "popover-search-icon";
+  searchIcon.textContent = "🔍";
   const search = document.createElement("input");
   search.type = "search";
   search.className = "popover-search";
   search.placeholder = "Buscar valor…";
-  pop.appendChild(search);
-
-  // "Seleccionar todo" toggle
-  const allRow = document.createElement("label");
-  allRow.className = "popover-row popover-all";
-  const allCb = document.createElement("input");
-  allCb.type = "checkbox";
-  allCb.checked = selected.size === values.length;
-  const allLabel = document.createElement("span");
-  allLabel.textContent = "Seleccionar todo";
-  allRow.append(allCb, allLabel);
-  pop.appendChild(allRow);
+  searchWrap.append(searchIcon, search);
+  pop.appendChild(searchWrap);
 
   // Lista de valores
   const list = document.createElement("div");
@@ -638,7 +691,7 @@ function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
       cb.onchange = () => {
         if (cb.checked) selected.add(val);
         else selected.delete(val);
-        allCb.checked = selected.size === values.length;
+        renderList();
       };
       const txt = document.createElement("span");
       txt.textContent = val;
@@ -651,32 +704,22 @@ function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
       empty.textContent = "Sin coincidencias";
       list.appendChild(empty);
     }
+    count.textContent = `Mostrando ${visible.length}`;
   }
   renderList();
   search.oninput = renderList;
 
-  allCb.onchange = () => {
-    if (allCb.checked) for (const v of values) selected.add(v);
-    else selected.clear();
-    renderList();
-  };
-
-  // Footer: aplicar / limpiar
+  // Footer: cancelar / aplicar
   const footer = document.createElement("div");
   footer.className = "popover-footer";
-  const clearBtn = document.createElement("button");
-  clearBtn.type = "button";
-  clearBtn.className = "ghost";
-  clearBtn.textContent = "Limpiar";
-  clearBtn.onclick = () => {
-    columnFilters[col.key] = null;
-    delete columnFilters[col.key];
-    pop.remove();
-    onChange();
-  };
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "ghost";
+  cancelBtn.textContent = "Cancelar";
+  cancelBtn.onclick = () => { pop.remove(); };
   const applyBtn = document.createElement("button");
   applyBtn.type = "button";
-  applyBtn.textContent = "Aplicar";
+  applyBtn.textContent = "Aceptar";
   applyBtn.onclick = () => {
     if (selected.size === values.length) {
       delete columnFilters[col.key];
@@ -686,7 +729,7 @@ function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
     pop.remove();
     onChange();
   };
-  footer.append(clearBtn, applyBtn);
+  footer.append(cancelBtn, applyBtn);
   pop.appendChild(footer);
 
   // Posicionar bajo el botón

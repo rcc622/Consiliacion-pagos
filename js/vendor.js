@@ -56,7 +56,7 @@ function headerNode(profile) {
 async function loadData() {
   const [clientsRes, reportsRes] = await Promise.all([
     sb.from("clients")
-      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status")
+      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status, enganche_form, enganche_date, anticipo_form, anticipo_date, vendor_id")
       .order("name"),
     sb.from("payments_report").select("client_id, total_amount, installments, updated_at"),
   ]);
@@ -310,7 +310,15 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
 
   function refreshSummary() {
     const paidRows = rows.filter(isPaidRow);
-    const totalPaid = paidRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    let totalPaid = paidRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    // Enganche y anticipo (con forma + fecha capturados) son pagos hechos
+    // y deben sumar al "Conciliado". El form="N/A" no cuenta.
+    if (client.enganche_form && client.enganche_form !== "N/A" && client.enganche_date) {
+      totalPaid += Number(client.enganche || 0);
+    }
+    if (client.anticipo_form && client.anticipo_form !== "N/A" && client.anticipo_date) {
+      totalPaid += Number(client.anticipo || 0);
+    }
     const totalContract = Number(client.amount || 0);
     clear(summary);
     summary.append(
@@ -327,7 +335,14 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
     const installments = rows
       .filter(isPaidRow)
       .map((r) => ({ n: r.n, amount: Number(r.amount), form: r.form, date: r.date }));
-    const totalPaid = installments.reduce((s, r) => s + Number(r.amount || 0), 0);
+    let totalPaid = installments.reduce((s, r) => s + Number(r.amount || 0), 0);
+    // Enganche y anticipo (con forma + fecha) cuentan al total cobrado.
+    if (client.enganche_form && client.enganche_form !== "N/A" && client.enganche_date) {
+      totalPaid += Number(client.enganche || 0);
+    }
+    if (client.anticipo_form && client.anticipo_form !== "N/A" && client.anticipo_date) {
+      totalPaid += Number(client.anticipo || 0);
+    }
 
     return sb.from("payments_report").upsert({
       client_id: client.id,
@@ -341,10 +356,11 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
   paintInfo();
   function paintInfo() {
     clear(info);
+    const onChange = () => { refreshSummary(); persist(); };
     info.append(
       methodPicker(client),
-      moneyEditorBlock("Enganche (opc)", client, "enganche"),
-      moneyEditorBlock("Anticipo (opc)", client, "anticipo"),
+      moneyEditorBlock("Enganche (opc)", client, "enganche", onChange),
+      moneyEditorBlock("Anticipo (opc)", client, "anticipo", onChange),
       statusPicker(client),
     );
   }
@@ -527,7 +543,25 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
     return tr;
   }
 
-  addBtn.addEventListener("click", () => {
+  addBtn.addEventListener("click", async () => {
+    // Si faltan método/enganche/anticipo, recuerda al asesor antes de seguir.
+    const ans = await askMissingDataConfirmation(client);
+    if (!ans.proceed) return;
+
+    // Si declaró "No lleva" para algunos, los marcamos como N/A en BD.
+    if (Array.isArray(ans.markNA) && ans.markNA.length) {
+      const patch = {};
+      for (const k of ans.markNA) {
+        if (k === "método") patch.payment_method = "N/A";
+        if (k === "enganche") { patch.enganche = 0; patch.enganche_form = "N/A"; patch.enganche_date = null; }
+        if (k === "anticipo") { patch.anticipo = 0; patch.anticipo_form = "N/A"; patch.anticipo_date = null; }
+      }
+      const { error } = await sb.from("clients").update(patch).eq("id", client.id);
+      if (error) { toast(error.message, "error"); return; }
+      Object.assign(client, patch);
+      paintInfo();
+    }
+
     rows.push({ id: localId(), n: rows.length + 1, amount: null, form: "", date: "" });
     if (pageSize !== Infinity) currentPage = totalPages();
     renderPage();
@@ -585,8 +619,10 @@ function methodPicker(client) {
   const current = client.payment_method || "";
   const inCatalog = METHODS.includes(current);
   for (const m of METHODS) select.appendChild(opt(m, m));
-  if (current && !inCatalog) select.appendChild(opt(current, current + " (legacy)"));
+  select.appendChild(opt("N/A", "N/A — no aplica"));
+  if (current && !inCatalog && current !== "N/A") select.appendChild(opt(current, current + " (legacy)"));
   select.value = current;
+  if (current === "N/A") wrap.classList.add("field-na");
 
   let saving = false;
   select.addEventListener("change", async () => {
@@ -604,8 +640,10 @@ function methodPicker(client) {
   return wrap;
 }
 
-// Bloque editable para enganche / anticipo (informativo, no afecta cálculo).
-function moneyEditorBlock(label, client, field) {
+// Bloque editable para enganche / anticipo. Cuando el asesor cambia el
+// monto, se abre un mini-modal pidiendo fecha y forma de pago. Se guardan
+// 3 columnas: <field>, <field>_form, <field>_date.
+function moneyEditorBlock(label, client, field, onChange = () => {}) {
   const wrap = document.createElement("label");
   wrap.className = "info-field";
   const span = document.createElement("span");
@@ -616,10 +654,33 @@ function moneyEditorBlock(label, client, field) {
   input.inputMode = "decimal";
   input.placeholder = "—";
   input.className = "money-editor";
+  const sub = document.createElement("small");
+  sub.className = "info-sub muted";
+
+  const formField = `${field}_form`;
+  const dateField = `${field}_date`;
 
   function paint() {
+    sub.classList.remove("warn");
+    if (client[formField] === "N/A") {
+      input.value = "";
+      input.placeholder = "N/A";
+      wrap.classList.add("field-na");
+      sub.textContent = "Marcado como No aplica";
+      return;
+    }
+    wrap.classList.remove("field-na");
+    input.placeholder = "—";
     const v = Number(client[field] || 0);
     input.value = v ? fmtMoney(v) : "";
+    if (v && client[formField] && client[dateField]) {
+      sub.textContent = `${client[formField]} · ${formatDate(client[dateField])}`;
+    } else if (v) {
+      sub.textContent = "Falta fecha / forma";
+      sub.classList.add("warn");
+    } else {
+      sub.textContent = "";
+    }
   }
   paint();
 
@@ -637,12 +698,44 @@ function moneyEditorBlock(label, client, field) {
     const cleaned = Number.isFinite(next) ? next : null;
     if ((client[field] ?? null) === (cleaned ?? null)) { paint(); return; }
 
+    if (cleaned == null || cleaned === 0) {
+      // Limpia monto + forma + fecha asociados.
+      saving = true;
+      const { error } = await sb.from("clients")
+        .update({ [field]: null, [formField]: null, [dateField]: null })
+        .eq("id", client.id);
+      saving = false;
+      if (error) { toast(error.message, "error"); paint(); return; }
+      client[field] = null;
+      client[formField] = null;
+      client[dateField] = null;
+      paint();
+      onChange();
+      return;
+    }
+
+    // Pide fecha y forma con un mini-modal.
+    const data = await askPaymentDetails({
+      title: `${label.replace(" (opc)", "")}: ${fmtMoney(cleaned)}`,
+      defaultForm: client[formField] || "",
+      defaultDate: client[dateField] || "",
+    });
+    if (!data) {
+      paint(); // canceló: revertir display
+      return;
+    }
+
     saving = true;
-    const { error } = await sb.from("clients").update({ [field]: cleaned }).eq("id", client.id);
+    const { error } = await sb.from("clients")
+      .update({ [field]: cleaned, [formField]: data.form, [dateField]: data.date })
+      .eq("id", client.id);
     saving = false;
     if (error) { toast(error.message, "error"); paint(); return; }
     client[field] = cleaned;
+    client[formField] = data.form;
+    client[dateField] = data.date;
     paint();
+    onChange();
     toast("Guardado.", "success", 1500);
   });
 
@@ -651,7 +744,7 @@ function moneyEditorBlock(label, client, field) {
     if (ev.key === "Escape") { paint(); input.blur(); }
   });
 
-  wrap.append(span, input);
+  wrap.append(span, input, sub);
   return wrap;
 }
 
@@ -699,6 +792,136 @@ function isPaidRow(r) {
 
 function localId() {
   return `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatDate(d) {
+  if (!d) return "";
+  const dt = new Date(d + "T00:00:00");
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString("es-MX");
+}
+
+// Mini-modal: pide forma de pago y fecha. Usado cuando el asesor captura
+// enganche o anticipo. Resuelve a {form, date} o null si canceló.
+function askPaymentDetails({ title, defaultForm = "", defaultDate = "" }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+
+    const modal = document.createElement("div");
+    modal.className = "modal";
+
+    const h = document.createElement("h2");
+    h.textContent = title;
+    modal.appendChild(h);
+
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.style.margin = "0";
+    note.textContent = "Captura la fecha y forma de pago.";
+    modal.appendChild(note);
+
+    const form = document.createElement("form");
+    form.className = "stacked-form";
+
+    const formLabel = document.createElement("label");
+    formLabel.textContent = "Forma de pago";
+    const formSelect = document.createElement("select");
+    formSelect.required = true;
+    formSelect.appendChild(opt("", "—"));
+    for (const f of PAYMENT_FORMS) formSelect.appendChild(opt(f, f));
+    formSelect.value = defaultForm;
+    formLabel.appendChild(formSelect);
+    form.appendChild(formLabel);
+
+    const dateLabel = document.createElement("label");
+    dateLabel.textContent = "Fecha de pago";
+    const dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.required = true;
+    dateInput.value = defaultDate;
+    dateLabel.appendChild(dateInput);
+    form.appendChild(dateLabel);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "ghost";
+    cancel.textContent = "Cancelar";
+    cancel.onclick = () => { backdrop.remove(); resolve(null); };
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.textContent = "Guardar";
+    actions.append(cancel, save);
+    form.appendChild(actions);
+    modal.appendChild(form);
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    setTimeout(() => formSelect.focus(), 0);
+
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      if (!formSelect.value || !dateInput.value) return;
+      backdrop.remove();
+      resolve({ form: formSelect.value, date: dateInput.value });
+    };
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve(null); }
+    });
+  });
+}
+
+// Pide confirmación al asesor cuando intenta agregar fila sin enganche/
+// anticipo/método capturados. Resuelve a true (proceder) o false (cancelar).
+// Si el cliente declara "No lleva" enganche/anticipo, los marcamos en la BD
+// con string "N/A" en el form para que el UI los pinte como deshabilitado.
+function askMissingDataConfirmation(client) {
+  return new Promise((resolve) => {
+    const missing = [];
+    if (!client.payment_method) missing.push("método");
+    if (!client.enganche && client[`enganche_form`] !== "N/A") missing.push("enganche");
+    if (!client.anticipo && client[`anticipo_form`] !== "N/A") missing.push("anticipo");
+    if (missing.length === 0) { resolve({ proceed: true }); return; }
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "modal";
+
+    const h = document.createElement("h2");
+    h.textContent = "Recordatorio";
+    modal.appendChild(h);
+
+    const p = document.createElement("p");
+    p.style.margin = "0";
+    p.innerHTML = `Aún no capturaste: <strong>${missing.join(", ")}</strong>.
+                   Esa información es importante antes de empezar a registrar pagos.
+                   ¿El cliente sí los lleva?`;
+    modal.appendChild(p);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const noLleva = document.createElement("button");
+    noLleva.type = "button";
+    noLleva.className = "ghost";
+    noLleva.textContent = "No lleva — marcar N/A";
+    noLleva.onclick = () => { backdrop.remove(); resolve({ proceed: true, markNA: missing }); };
+    const siLleva = document.createElement("button");
+    siLleva.type = "button";
+    siLleva.textContent = "Sí lleva — capturar primero";
+    siLleva.onclick = () => { backdrop.remove(); resolve({ proceed: false }); };
+    actions.append(noLleva, siLleva);
+    modal.appendChild(actions);
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve({ proceed: false }); }
+    });
+  });
 }
 
 function opt(value, label) {
