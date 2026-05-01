@@ -38,21 +38,30 @@ let clientSearch = "";
 // Per-column allowlists. null/undefined = sin filtro (todos pasan).
 // Set vacío = nada pasa. Set con valores = solo esos.
 let columnFilters = {};
+let clientSort = { col: null, dir: 1 };
 let vendorSort = { col: null, dir: 1 };
 
-// Columnas filtrables de la tabla "Clientes": cada una expone un icono ▾
-// que abre un popover con checkboxes (estilo Excel autofilter).
-const FILTERABLE_COLS = [
-  { key: "vendor",  label: "Vendedor",       value: (c, ctx) => ctx.vendorLabel(c) },
-  { key: "method",  label: "Método de pago", value: (c) => c.payment_method || "—" },
-  { key: "status",  label: "Estado",         value: (c, ctx) => ctx.statusLabel(c) },
-  { key: "active",  label: "Activo",         value: (c) => c.is_active ? "Activo" : "—" },
+// Columnas de la tabla "Clientes": metadata para sort + filter.
+// `type` controla la dirección inicial al hacer click (numérico = desc).
+// `filterable` decide si el header lleva botón ▾.
+const CLIENT_COLS = [
+  { key: "name",       label: "Cliente",        type: "string", filterable: false, value: (c) => c.name || "" },
+  { key: "vendor",     label: "Vendedor",       type: "string", filterable: true,  value: (c, ctx) => ctx.vendorLabel(c) },
+  { key: "method",     label: "Método de pago", type: "string", filterable: true,  value: (c) => c.payment_method || "—" },
+  { key: "amount",     label: "Monto",          type: "number", filterable: false, value: (c) => Number(c.amount || 0) },
+  { key: "conciliado", label: "Conciliado",     type: "number", filterable: false, value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
+  { key: "status",     label: "Estado",         type: "string", filterable: true,  value: (c, ctx) => ctx.statusLabel(c) },
+  { key: "active",     label: "Activo",         type: "string", filterable: true,  value: (c) => c.is_active ? "Activo" : "—" },
+  { key: "notes",      label: "Notas",          type: "string", filterable: false, value: (c) => c.notes || "" },
 ];
+
+const FILTERABLE_COLS = CLIENT_COLS.filter((c) => c.filterable);
 
 export async function renderMaster() {
   selected = new Set();
   clientSearch = "";
   columnFilters = {};
+  clientSort = { col: null, dir: 1 };
   vendorSort = { col: null, dir: 1 };
   const root = document.getElementById("view-master");
   clear(root);
@@ -150,8 +159,11 @@ async function loadAll() {
 
 function paintTopSummary(container, clients, reports) {
   const total = clients.length;
-  const reportedIds = new Set(reports.map((r) => r.client_id));
-  const reported = clients.filter((c) => reportedIds.has(c.id)).length;
+  // "Reportados" debe coincidir con el badge de la tabla: solo cuenta
+  // clientes con conciliado > 0. Sin esto, una fila residual en
+  // payments_report (de pruebas viejas) infla el conteo.
+  const conciliadoByClient = new Map(reports.map((r) => [r.client_id, Number(r.total_amount || 0)]));
+  const reported = clients.filter((c) => (conciliadoByClient.get(c.id) || 0) > 0).length;
   const pct = total ? Math.round((reported / total) * 100) : 0;
   const totalAmount = reports.reduce((s, r) => s + Number(r.total_amount || 0), 0);
 
@@ -174,7 +186,7 @@ function stat(label, value) {
 
 function paintByVendor(container, vendors, clients, reports) {
   clear(container);
-  const reportedIds = new Set(reports.map((r) => r.client_id));
+  const reportedIds = new Set(reports.filter((r) => Number(r.total_amount) > 0).map((r) => r.client_id));
   const amountByVendor = new Map();
   for (const r of reports) {
     amountByVendor.set(r.vendor_id, (amountByVendor.get(r.vendor_id) || 0) + Number(r.total_amount || 0));
@@ -266,7 +278,7 @@ function paintByVendor(container, vendors, clients, reports) {
 
 function paintByZone(container, clients, reports) {
   clear(container);
-  const reportedIds = new Set(reports.map((r) => r.client_id));
+  const reportedIds = new Set(reports.filter((r) => Number(r.total_amount) > 0).map((r) => r.client_id));
   const amountByClient = new Map(reports.map((r) => [r.client_id, Number(r.total_amount || 0)]));
 
   const groups = new Map();
@@ -305,8 +317,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   const vendorById = new Map(vendors.map((v) => [v.id, v]));
   const reportByClient = new Map(reports.map((r) => [r.client_id, r]));
 
-  // Contexto compartido para que los extractores de FILTERABLE_COLS puedan
-  // mapear vendor_id → label, calcular status, etc.
+  // Contexto compartido: lo usan los extractores de CLIENT_COLS.
   const filterCtx = {
     vendorLabel: (c) => {
       const v = vendorById.get(c.vendor_id);
@@ -317,6 +328,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       const conciliado = Number(r?.total_amount || 0);
       return clientStatus(c, conciliado).label;
     },
+    reportFor: (c) => reportByClient.get(c.id),
   };
 
   // Barra superior: solo el buscador libre. Los filtros por valor viven
@@ -333,29 +345,68 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   const tableEl = document.createElement("table");
   tableEl.className = "filterable";
   const thead = document.createElement("thead");
-  thead.innerHTML = `
-    <tr>
-      <th class="check-col"><input type="checkbox" data-role="select-all" /></th>
-      <th>Cliente</th>
-      <th data-col="vendor"></th>
-      <th data-col="method"></th>
-      <th>Monto</th>
-      <th>Conciliado</th>
-      <th data-col="status"></th>
-      <th data-col="active"></th>
-      <th>Notas</th>
-      <th></th>
-    </tr>`;
+  const trh = document.createElement("tr");
+
+  // Checkbox col
+  const thCheck = document.createElement("th");
+  thCheck.className = "check-col";
+  thCheck.innerHTML = `<input type="checkbox" data-role="select-all" />`;
+  trh.appendChild(thCheck);
+
+  // Cada columna sortable / filtrable
+  for (const col of CLIENT_COLS) {
+    const th = document.createElement("th");
+    th.dataset.col = col.key;
+
+    if (col.filterable) {
+      th.appendChild(buildFilterableHeader(col, clients, filterCtx, () => repaintBody()));
+    } else {
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "th-label sortable-only";
+      labelSpan.textContent = col.label;
+      th.appendChild(labelSpan);
+    }
+
+    th.classList.add("sortable");
+    th.addEventListener("click", (ev) => {
+      // No disparar sort si el click vino del botón ▾ del filtro.
+      if (ev.target.closest(".th-filter-btn")) return;
+      onClickSort(col);
+    });
+    trh.appendChild(th);
+  }
+
+  // Acciones col (sin sort)
+  const thActions = document.createElement("th");
+  trh.appendChild(thActions);
+
+  thead.appendChild(trh);
   tableEl.appendChild(thead);
   const tbody = document.createElement("tbody");
   tableEl.appendChild(tbody);
   container.appendChild(tableEl);
 
-  // Inyectar header con botón filtro en cada columna filtrable.
-  for (const col of FILTERABLE_COLS) {
-    const th = thead.querySelector(`th[data-col="${col.key}"]`);
-    if (th) th.appendChild(buildFilterableHeader(col, clients, filterCtx, () => repaintBody()));
+  function onClickSort(col) {
+    if (clientSort.col === col.key) {
+      clientSort.dir = -clientSort.dir;
+    } else {
+      clientSort.col = col.key;
+      clientSort.dir = col.type === "number" ? -1 : 1;
+    }
+    paintSortIndicators();
+    repaintBody();
   }
+
+  function paintSortIndicators() {
+    for (const col of CLIENT_COLS) {
+      const th = thead.querySelector(`th[data-col="${col.key}"]`);
+      if (!th) continue;
+      const labelSpan = th.querySelector(".th-label");
+      const arrow = clientSort.col === col.key ? (clientSort.dir === 1 ? " ▲" : " ▼") : "";
+      if (labelSpan) labelSpan.textContent = col.label + arrow;
+    }
+  }
+  paintSortIndicators();
 
   let rowChecks = [];
 
@@ -387,10 +438,11 @@ function paintDetail(container, vendors, clients, reports, refresh) {
 
   function repaintBody() {
     const filtered = applyClientFilters(clients, filterCtx);
+    const sorted = applyClientSort(filtered, filterCtx);
     clear(tbody);
     rowChecks = [];
 
-    for (const c of filtered) {
+    for (const c of sorted) {
       const v = vendorById.get(c.vendor_id);
       const r = reportByClient.get(c.id);
       const tr = document.createElement("tr");
@@ -654,6 +706,19 @@ function applyClientFilters(clients, ctx) {
       if (!allowed.has(v)) return false;
     }
     return true;
+  });
+}
+
+function applyClientSort(clients, ctx) {
+  if (!clientSort.col) return clients;
+  const col = CLIENT_COLS.find((c) => c.key === clientSort.col);
+  if (!col) return clients;
+  const dir = clientSort.dir;
+  return [...clients].sort((a, b) => {
+    const av = col.value(a, ctx);
+    const bv = col.value(b, ctx);
+    if (col.type === "number") return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
+    return String(av).localeCompare(String(bv)) * dir;
   });
 }
 

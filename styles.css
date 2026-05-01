@@ -250,12 +250,15 @@ tr:last-child td { border-bottom: 0; }
 
 /* Headers filtrables: label + botón ▾ */
 table.filterable th { padding-top: 8px; padding-bottom: 8px; }
+table.filterable th.sortable { cursor: pointer; user-select: none; }
+table.filterable th.sortable:hover .th-label { color: var(--text); }
 .th-filterable {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
 }
+.th-label.sortable-only { white-space: nowrap; }
 .th-filter-btn {
   background: transparent;
   border: 1px solid transparent;
