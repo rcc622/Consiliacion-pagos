@@ -254,6 +254,7 @@ table.filterable th { padding-top: 8px; padding-bottom: 8px; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
 }
 .th-filter-btn {
   background: transparent;
@@ -306,13 +307,26 @@ table.filterable th { padding-top: 8px; padding-bottom: 8px; }
 }
 .filter-popover .popover-row {
   display: flex;
+  flex-direction: row;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   padding: 4px 6px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 13px;
   color: var(--text);
+  text-align: left;
+}
+.filter-popover .popover-row input[type="checkbox"] {
+  flex: none;
+  margin: 0;
+}
+.filter-popover .popover-row span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .filter-popover .popover-row:hover { background: var(--bg); }
 .filter-popover .popover-all {
