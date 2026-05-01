@@ -564,7 +564,29 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
   const close = document.createElement("button");
   close.type = "button";
   close.textContent = "Cerrar";
-  close.onclick = () => { backdrop.remove(); refresh(); };
+  let dirty = false;
+  function markDirty() {
+    if (dirty) return;
+    dirty = true;
+    close.textContent = "Cerrar y guardar";
+  }
+  // Cualquier cambio en inputs/selects/textareas del modal marca dirty.
+  // El toggle de modo está fuera del flujo de captura, así que lo excluimos.
+  modal.addEventListener("change", (ev) => {
+    if (ev.target.closest("[data-role=mode-toggle]")) return;
+    markDirty();
+  });
+  close.onclick = async () => {
+    // Si hay foco en algún input, blurear primero para forzar persist
+    // (los editores guardan al perder foco).
+    if (document.activeElement && document.activeElement !== document.body) {
+      document.activeElement.blur();
+    }
+    // Pequeña espera para que termine cualquier save async pendiente.
+    if (dirty) await new Promise((r) => setTimeout(r, 150));
+    backdrop.remove();
+    refresh();
+  };
   actions.appendChild(close);
   modal.appendChild(actions);
 
