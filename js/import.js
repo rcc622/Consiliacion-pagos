@@ -46,6 +46,10 @@ function normalizeRow(row) {
       _format: "deuda",
       _hasContent: !!contacto,
       contacto,
+      // Total en moneda firmado = monto del contrato (lo que firmó). Va a `amount`.
+      total_firmado: out.total_en_moneda_firmado || out.total_firmado || out.monto_firmado || "",
+      // Cantidad por pagar = lo que aún debe. Solo se usa para skip-zeros
+      // (si todo el grupo tiene 0, el cliente ya saldó y no entra al sistema).
       cantidad: out.cantidad_por_pagar || "",
       referencia: out.referencia || "",
     };
@@ -95,26 +99,30 @@ async function importDeuda(rows, defaults) {
     };
   }
 
-  // 1) Agrupar.
-  const groups = new Map(); // key → { contacto, referencia, total }
+  // 1) Agrupar.  Sumamos por separado:
+  //    totalFirmado → contrato total (va a clients.amount = "Monto Proyecto").
+  //    totalPagar   → pendiente; solo se usa para descartar clientes ya saldados.
+  const groups = new Map();
   for (const r of rows) {
     const contacto = r.contacto.trim();
     if (!contacto) continue;
     const ref = r.referencia.trim();
     const key = ref || `name:${contacto.toLowerCase()}`;
     if (!groups.has(key)) {
-      groups.set(key, { contacto, referencia: ref || null, total: 0 });
+      groups.set(key, { contacto, referencia: ref || null, totalFirmado: 0, totalPagar: 0 });
     }
     const g = groups.get(key);
-    g.total += parseAmount(r.cantidad) || 0;
+    g.totalFirmado += parseAmount(r.total_firmado) || 0;
+    g.totalPagar   += parseAmount(r.cantidad)      || 0;
   }
 
-  // 2) Filtrar grupos en cero.
+  // 2) Filtrar grupos en cero.  Si el cliente no debe nada (totalPagar=0),
+  //    se omite — ya saldó y no necesita estar en el sistema.
   const candidates = [];
   let skipped = 0;
   for (const g of groups.values()) {
-    if (g.total <= 0) { skipped++; continue; }
-    candidates.push({ ...g, total: +g.total.toFixed(2) });
+    if (g.totalPagar <= 0) { skipped++; continue; }
+    candidates.push({ ...g, amount: +g.totalFirmado.toFixed(2) });
   }
 
   // 3) Lookup de existentes por reference (en una sola query).
@@ -127,18 +135,20 @@ async function importDeuda(rows, defaults) {
   }
 
   // 4) Split: insert (nuevos) vs update (existentes con reference).
+  //    En el update preservamos notes / status / installments — solo
+  //    se actualiza name + amount.
   const toInsert = [];
   const toUpdate = []; // [{ id, patch }]
   for (const g of candidates) {
     const existingId = g.referencia ? existingByRef.get(g.referencia) : null;
     if (existingId) {
-      toUpdate.push({ id: existingId, patch: { name: g.contacto, amount: g.total } });
+      toUpdate.push({ id: existingId, patch: { name: g.contacto, amount: g.amount } });
     } else {
       toInsert.push({
         name: g.contacto,
         reference: g.referencia,
         vendor_id: defaultVendor,
-        amount: g.total,
+        amount: g.amount,
       });
     }
   }

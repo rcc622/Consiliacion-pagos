@@ -101,7 +101,7 @@ function paintTable(container, clients, reports, profile, refresh) {
     <tr>
       <th>Cliente</th>
       <th>Método de pago</th>
-      <th>Monto</th>
+      <th>Monto Proyecto</th>
       <th>Conciliado</th>
       <th>Estado</th>
       <th>Notas</th>
@@ -321,7 +321,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
     const totalContract = Number(client.amount || 0);
     clear(summary);
     summary.append(
-      stat("Monto contratado", fmtMoney(totalContract)),
+      stat("Monto Proyecto", fmtMoney(totalContract)),
       stat("Conciliado", fmtMoney(totalPaid)),
       stat("Pte conciliar", fmtMoney(Math.max(0, totalContract - totalPaid)), "danger"),
       stat("Pagos", String(paidRows.length)),
