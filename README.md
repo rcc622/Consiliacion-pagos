@@ -23,17 +23,15 @@ En **Authentication → Users → Add user** crea al menos:
 - Un usuario `master` (gerente).
 - Uno o más usuarios `vendor`.
 
-El trigger `on_auth_user_created` les genera un renglón en `profiles` con `role='vendor'`. Para promover al gerente, corre en SQL Editor:
+El trigger `on_auth_user_created` les genera un renglón en `profiles` con `role='vendor'`. Para promover al gerente y nombrar a los vendedores, abre [`users.sql`](./users.sql) en el SQL Editor — está dividido en secciones (backfill, masters, vendedores por zona, verificación) y es idempotente, lo puedes correr cada vez que des de alta a alguien nuevo.
+
+Si prefieres un quick-fix manual:
 
 ```sql
 update public.profiles
    set role = 'master', full_name = 'Nombre del gerente'
  where email = 'gerente@empresa.com';
-```
 
-Y para los vendedores, opcionalmente, llena `full_name` y `zone`:
-
-```sql
 update public.profiles
    set full_name = 'Juan Pérez', zone = 'Norte'
  where email = 'juan@empresa.com';
