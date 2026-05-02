@@ -12,6 +12,7 @@ import { sb, fetchAll } from "./supabase.js";
 import { toast, clear } from "./ui.js";
 
 const BASE_COLS = [
+  "Referencia",
   "Cliente",
   "Método de pago",
   "Monto Proyecto",
@@ -36,7 +37,7 @@ function isInstallmentMethod(method) {
 async function fetchData() {
   const [vendorsRes, clients, reports] = await Promise.all([
     sb.from("profiles").select("id, email, full_name").eq("role", "vendor"),
-    fetchAll(() => sb.from("clients").select("id, name, vendor_id, payment_method, amount, status, enganche, enganche_form, enganche_date, anticipo, anticipo_form, anticipo_date, notes")),
+    fetchAll(() => sb.from("clients").select("id, name, reference, vendor_id, payment_method, amount, status, enganche, enganche_form, enganche_date, anticipo, anticipo_form, anticipo_date, notes")),
     fetchAll(() => sb.from("payments_report").select("client_id, total_amount, installments")),
   ]);
   if (vendorsRes.error) throw vendorsRes.error;
@@ -68,6 +69,7 @@ function buildRows({ vendors, clients, reports }) {
     return {
       vendor_id: c.vendor_id || null,
       vendor_label: v ? (v.full_name || v.email) : "Sin vendedor",
+      reference: c.reference || "",
       cliente: c.name,
       metodo: c.payment_method || "—",
       monto,
@@ -131,6 +133,7 @@ function buildBlockHeaders(metodo, rowsInBlock) {
 function rowToArray(row, headers) {
   const baseLen = BASE_COLS.length;
   const arr = [
+    row.reference,
     row.cliente,
     row.metodo,
     row.monto,
@@ -156,52 +159,79 @@ function rowToArray(row, headers) {
   return arr;
 }
 
-function exportXLSX(grouped, filename) {
-  if (!window.XLSX) { toast("SheetJS no está disponible.", "error"); return; }
+// Construye el workbook XLSX de UN asesor: una sola hoja con todos los
+// bloques por método, formato moneda en columnas $.
+function buildVendorWorkbook(vendorGroup) {
   const XLSX = window.XLSX;
   const wb = XLSX.utils.book_new();
+  const aoa = [];
+  aoa.push([`ASESOR: ${vendorGroup.vendorLabel.toUpperCase()}`]);
+  aoa.push([]);
 
-  for (const vendorGroup of grouped) {
-    const aoa = [];
-    aoa.push([`ASESOR: ${vendorGroup.vendorLabel.toUpperCase()}`]);
-    aoa.push([]);
-
-    for (const block of vendorGroup.blocks) {
-      const headers = buildBlockHeaders(block.metodo, block.rows);
-      aoa.push([`Método de pago: ${block.metodo}`]);
-      aoa.push(headers);
-      for (const row of block.rows) aoa.push(rowToArray(row, headers));
-      aoa.push([]); // separador entre bloques
-    }
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    // Anchos básicos para las primeras columnas; las dinámicas usan default.
-    ws["!cols"] = [
-      { wch: 30 }, { wch: 24 }, { wch: 14 }, { wch: 14 },
-      { wch: 12 }, { wch: 12 }, { wch: 2  },
-      { wch: 12 }, { wch: 12 }, { wch: 14 },
-      { wch: 12 }, { wch: 12 }, { wch: 14 },
-    ];
-    applyMoneyFormatting(XLSX, ws);
-    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(vendorGroup.vendorLabel));
+  for (const block of vendorGroup.blocks) {
+    const headers = buildBlockHeaders(block.metodo, block.rows);
+    aoa.push([`Método de pago: ${block.metodo}`]);
+    aoa.push(headers);
+    for (const row of block.rows) aoa.push(rowToArray(row, headers));
+    aoa.push([]); // separador entre bloques
   }
 
-  XLSX.writeFile(wb, filename);
-  toast(`Exportado: ${filename}`, "success");
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [
+    { wch: 12 },                            // Referencia
+    { wch: 30 }, { wch: 24 },                // Cliente, Método
+    { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, // Monto, Conciliado, Pte%, Estado
+    { wch: 2  },                             // separador
+    { wch: 12 }, { wch: 12 }, { wch: 14 },   // Enganche $, fecha, forma
+    { wch: 12 }, { wch: 12 }, { wch: 14 },   // Anticipo $, fecha, forma
+  ];
+  applyMoneyFormatting(XLSX, ws);
+  XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(vendorGroup.vendorLabel));
+  return wb;
 }
 
-// Aplica formato moneda ($#,##0.00) a las columnas que llevan $.
-// Base: 2 (Monto), 3 (Conciliado), 7 (Enganche), 10 (Anticipo).
-// MSI: 13, 16, 19, ... (cada 3 cols, los montos de Mens N).
+// 1 asesor → un único .xlsx.
+// >1 asesores → un .zip con un .xlsx por asesor.
+async function exportXLSX(grouped, baseName) {
+  if (!window.XLSX) { toast("SheetJS no está disponible.", "error"); return; }
+  const XLSX = window.XLSX;
+
+  if (grouped.length === 1) {
+    const wb = buildVendorWorkbook(grouped[0]);
+    const filename = `${baseName}_${sanitizeFileName(grouped[0].vendorLabel)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    toast(`Exportado: ${filename}`, "success");
+    return;
+  }
+
+  if (!window.JSZip) {
+    toast("JSZip no está disponible. No se puede armar el zip.", "error");
+    return;
+  }
+  const zip = new window.JSZip();
+  for (const vendorGroup of grouped) {
+    const wb = buildVendorWorkbook(vendorGroup);
+    const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    zip.file(`${sanitizeFileName(vendorGroup.vendorLabel)}.xlsx`, buffer);
+  }
+  const blob = await zip.generateAsync({ type: "blob" });
+  const filename = `${baseName}.zip`;
+  triggerDownload(blob, filename);
+  toast(`Exportado: ${filename} (${grouped.length} asesores)`, "success");
+}
+
+// Aplica formato moneda ($#,##0.00) a las columnas con $.
+// Base: 3 (Monto), 4 (Conciliado), 8 (Enganche), 11 (Anticipo).
+// MSI: 14, 17, 20, ... (cada 3 cols, los montos de Mens N).
 function applyMoneyFormatting(XLSX, ws) {
   if (!ws["!ref"]) return;
   const range = XLSX.utils.decode_range(ws["!ref"]);
-  const baseMoneyCols = [2, 3, 7, 10];
+  const baseMoneyCols = [3, 4, 8, 11];
   const fmt = '"$"#,##0.00';
   for (let row = range.s.r; row <= range.e.r; row++) {
     for (let col = range.s.c; col <= range.e.c; col++) {
       const isBaseMoney = baseMoneyCols.includes(col);
-      const isMensMoney = col >= 13 && (col - 13) % 3 === 0;
+      const isMensMoney = col >= 14 && (col - 14) % 3 === 0;
       if (!isBaseMoney && !isMensMoney) continue;
       const ref = XLSX.utils.encode_cell({ r: row, c: col });
       const cell = ws[ref];
@@ -424,6 +454,6 @@ export async function exportConciliation(format) {
 
   const grouped = groupForExport(filtered);
   const ts = new Date().toISOString().slice(0, 10);
-  if (format === "xlsx") exportXLSX(grouped, `conciliacion_${ts}.xlsx`);
+  if (format === "xlsx") await exportXLSX(grouped, `conciliacion_${ts}`);
   else                   await exportCSV(grouped, `conciliacion_${ts}`);
 }
