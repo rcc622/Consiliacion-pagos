@@ -135,6 +135,12 @@ function buildToolbar(refresh) {
   auditBtn.textContent = "Auditar duplicados";
   auditBtn.onclick = () => auditDuplicatesFlow(refresh);
 
+  const backupBtn = document.createElement("button");
+  backupBtn.className = "ghost";
+  backupBtn.textContent = "Backup";
+  backupBtn.title = "Descarga un JSON con todos los clientes y reportes actuales.";
+  backupBtn.onclick = () => backupFlow();
+
   const spacer = document.createElement("div");
   spacer.className = "spacer";
 
@@ -143,7 +149,7 @@ function buildToolbar(refresh) {
   wipeBtn.textContent = "Vaciar lista";
   wipeBtn.onclick = () => bulkDeleteFlow(refresh);
 
-  bar.append(importBtn, addBtn, exportXlsxBtn, exportCsvBtn, auditBtn, spacer, wipeBtn);
+  bar.append(importBtn, addBtn, exportXlsxBtn, exportCsvBtn, auditBtn, backupBtn, spacer, wipeBtn);
   return bar;
 }
 
@@ -967,6 +973,36 @@ async function deleteClientFlow(client, refresh) {
   if (error) { toast(error.message, "error"); return; }
   toast("Cliente eliminado.", "success");
   refresh();
+}
+
+// Descarga un JSON con todos los clientes y reportes actuales.
+// Útil para tener un snapshot antes de operaciones masivas (import,
+// vaciar lista, audit) y poder revertir manualmente desde SQL Editor
+// si algo sale mal.
+async function backupFlow() {
+  let clients, reports;
+  try {
+    clients = await fetchAll(() => sb.from("clients").select("*"));
+    reports = await fetchAll(() => sb.from("payments_report").select("*"));
+  } catch (e) { toast(e.message || String(e), "error"); return; }
+
+  const data = {
+    version: 1,
+    exported_at: new Date().toISOString(),
+    clients,
+    payments_report: reports,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `backup_${ts}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`Backup descargado: ${clients.length} clientes + ${reports.length} reportes.`, "success");
 }
 
 // Auditor de duplicados: lista clientes que comparten reference / nombre+monto / nombre.
