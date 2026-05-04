@@ -130,6 +130,11 @@ function buildToolbar(refresh) {
   exportCsvBtn.textContent = "Exportar CSV";
   exportCsvBtn.onclick = () => exportConciliation("csv");
 
+  const auditBtn = document.createElement("button");
+  auditBtn.className = "ghost";
+  auditBtn.textContent = "Auditar duplicados";
+  auditBtn.onclick = () => auditDuplicatesFlow(refresh);
+
   const spacer = document.createElement("div");
   spacer.className = "spacer";
 
@@ -138,7 +143,7 @@ function buildToolbar(refresh) {
   wipeBtn.textContent = "Vaciar lista";
   wipeBtn.onclick = () => bulkDeleteFlow(refresh);
 
-  bar.append(importBtn, addBtn, exportXlsxBtn, exportCsvBtn, spacer, wipeBtn);
+  bar.append(importBtn, addBtn, exportXlsxBtn, exportCsvBtn, auditBtn, spacer, wipeBtn);
   return bar;
 }
 
@@ -960,6 +965,166 @@ async function deleteClientFlow(client, refresh) {
   if (error) { toast(error.message, "error"); return; }
   toast("Cliente eliminado.", "success");
   refresh();
+}
+
+// Auditor de duplicados: lista clientes que comparten reference / nombre+monto / nombre.
+async function auditDuplicatesFlow(refresh) {
+  let clients;
+  try {
+    clients = await fetchAll(() => sb.from("clients").select("id, name, reference, amount, vendor_id"));
+  } catch (e) { toast(e.message || String(e), "error"); return; }
+
+  const { data: vendors, error: vErr } = await sb.from("profiles")
+    .select("id, email, full_name").eq("role", "vendor");
+  if (vErr) { toast(vErr.message, "error"); return; }
+  const vendorById = new Map((vendors || []).map((v) => [v.id, v]));
+
+  // 1) Por reference (case A: bug duro).
+  const byRef = new Map();
+  for (const c of clients) {
+    if (!c.reference) continue;
+    if (!byRef.has(c.reference)) byRef.set(c.reference, []);
+    byRef.get(c.reference).push(c);
+  }
+  const dupRef = [...byRef.entries()].filter(([, arr]) => arr.length > 1);
+
+  // 2) Por nombre + monto idénticos.
+  const byNM = new Map();
+  for (const c of clients) {
+    const k = `${c.name}|${Number(c.amount || 0).toFixed(2)}`;
+    if (!byNM.has(k)) byNM.set(k, []);
+    byNM.get(k).push(c);
+  }
+  const dupNM = [...byNM.entries()].filter(([, arr]) => arr.length > 1);
+
+  // 3) Por nombre. Excluye los multi-proyecto legítimos (todos con
+  //    references distintos no vacíos).
+  const byName = new Map();
+  for (const c of clients) {
+    if (!byName.has(c.name)) byName.set(c.name, []);
+    byName.get(c.name).push(c);
+  }
+  const dupName = [...byName.entries()].filter(([, arr]) => {
+    if (arr.length <= 1) return false;
+    const refs = arr.map((c) => c.reference).filter(Boolean);
+    const distinct = new Set(refs);
+    const allDistinctRefs = refs.length === arr.length && distinct.size === arr.length;
+    return !allDistinctRefs;
+  });
+
+  showAuditModal({ dupRef, dupNM, dupName, vendorById, refresh });
+}
+
+function showAuditModal({ dupRef, dupNM, dupName, vendorById, refresh }) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const modal = document.createElement("div");
+  modal.className = "modal audit-modal";
+
+  const h = document.createElement("h2");
+  h.textContent = "Auditoría de duplicados";
+  modal.appendChild(h);
+
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.style.margin = "0";
+  note.textContent = "Revisa cada grupo y elimina los duplicados con el botón Eliminar. Los multi-proyecto legítimos (mismo cliente con references distintos) ya se filtran de la sección por nombre.";
+  modal.appendChild(note);
+
+  modal.appendChild(buildAuditSection(
+    `Por referencia compartida (${dupRef.length} grupos)`,
+    "🔴 Duplicado real — un mismo reference no debería estar en dos clientes.",
+    dupRef, vendorById,
+  ));
+  modal.appendChild(buildAuditSection(
+    `Por nombre + monto idénticos (${dupNM.length} grupos)`,
+    "🟡 Muy probable duplicado — mismo nombre y mismo monto.",
+    dupNM, vendorById,
+  ));
+  modal.appendChild(buildAuditSection(
+    `Por nombre solo, no multi-proyecto (${dupName.length} grupos)`,
+    "🟠 Mismo nombre con references parciales o repetidos. Revisar caso por caso.",
+    dupName, vendorById,
+  ));
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "Cerrar";
+  close.onclick = () => { backdrop.remove(); refresh(); };
+  actions.appendChild(close);
+  modal.appendChild(actions);
+
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener("click", (ev) => {
+    if (ev.target === backdrop) { backdrop.remove(); refresh(); }
+  });
+}
+
+function buildAuditSection(title, hint, groups, vendorById) {
+  const details = document.createElement("details");
+  details.className = "audit-section";
+  if (groups.length > 0) details.open = true;
+
+  const summary = document.createElement("summary");
+  summary.textContent = title;
+  details.appendChild(summary);
+
+  if (!groups.length) {
+    const ok = document.createElement("p");
+    ok.className = "muted";
+    ok.style.margin = "6px 0";
+    ok.textContent = "✅ Sin coincidencias.";
+    details.appendChild(ok);
+    return details;
+  }
+
+  const hintEl = document.createElement("p");
+  hintEl.className = "muted";
+  hintEl.style.margin = "4px 0 8px";
+  hintEl.textContent = hint;
+  details.appendChild(hintEl);
+
+  for (const [key, arr] of groups) {
+    const group = document.createElement("div");
+    group.className = "audit-group";
+    const head = document.createElement("div");
+    head.className = "audit-group-head";
+    head.innerHTML = `<strong>${escapeHtml(key)}</strong> · ${arr.length} clientes`;
+    group.appendChild(head);
+
+    const list = document.createElement("ul");
+    list.className = "audit-group-list";
+    for (const c of arr) {
+      const li = document.createElement("li");
+      const v = vendorById.get(c.vendor_id);
+      const vendorName = v ? (v.full_name || v.email) : "—";
+      const monto = c.amount != null ? fmtMoney(c.amount) : "—";
+      const ref = c.reference ? `[${escapeHtml(c.reference)}] ` : "";
+      const span = document.createElement("span");
+      span.innerHTML = `${ref}<strong>${escapeHtml(c.name)}</strong> · ${escapeHtml(vendorName)} · ${monto}`;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "icon-danger";
+      del.textContent = "Eliminar";
+      del.onclick = async () => {
+        if (!confirm(`¿Eliminar ${c.name}? Esta acción es permanente.`)) return;
+        const { error } = await sb.from("clients").delete().eq("id", c.id);
+        if (error) { toast(error.message, "error"); return; }
+        toast("Eliminado.", "success");
+        li.remove();
+        if (list.children.length <= 1) group.remove();
+      };
+      li.append(span, del);
+      list.appendChild(li);
+    }
+    group.appendChild(list);
+    details.appendChild(group);
+  }
+
+  return details;
 }
 
 async function bulkDeleteFlow(refresh) {
