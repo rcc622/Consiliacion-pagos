@@ -56,6 +56,7 @@ create table if not exists public.clients (
   enganche_date  date,
   anticipo_form  text,
   anticipo_date  date,
+  dup_ok         boolean not null default false,
   created_at     timestamptz not null default now()
 );
 
@@ -74,6 +75,7 @@ alter table public.clients add column if not exists enganche_form  text;
 alter table public.clients add column if not exists enganche_date  date;
 alter table public.clients add column if not exists anticipo_form  text;
 alter table public.clients add column if not exists anticipo_date  date;
+alter table public.clients add column if not exists dup_ok         boolean not null default false;
 
 create index if not exists clients_vendor_idx on public.clients(vendor_id);
 create index if not exists clients_zone_idx   on public.clients(zone);

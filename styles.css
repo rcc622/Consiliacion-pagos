@@ -612,7 +612,19 @@ td.vendor-asesor {
   background: var(--bg);
   border-radius: 4px;
 }
-.audit-group-head { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+.audit-group-head {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.audit-ok-btn {
+  font-size: 11px;
+  padding: 2px 10px;
+}
 .audit-group-list { list-style: none; padding-left: 0; margin: 0; }
 .audit-group-list li {
   display: flex;

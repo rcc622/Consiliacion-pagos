@@ -975,7 +975,7 @@ async function auditDuplicatesFlow(refresh) {
   let reports;
   try {
     clients = await fetchAll(() => sb.from("clients")
-      .select("id, name, reference, amount, vendor_id, notes, status, enganche, enganche_form, enganche_date, anticipo, anticipo_form, anticipo_date"));
+      .select("id, name, reference, amount, vendor_id, notes, status, enganche, enganche_form, enganche_date, anticipo, anticipo_form, anticipo_date, dup_ok"));
     reports = await fetchAll(() => sb.from("payments_report").select("client_id, total_amount, installments"));
   } catch (e) { toast(e.message || String(e), "error"); return; }
 
@@ -1017,7 +1017,10 @@ async function auditDuplicatesFlow(refresh) {
     if (!byRef.has(c.reference)) byRef.set(c.reference, []);
     byRef.get(c.reference).push(c);
   }
-  const dupRef = [...byRef.entries()].filter(([, arr]) => arr.length > 1);
+  // Grupos donde TODOS los clientes están marcados como OK ya no se reportan
+  // (el master los confirmó como duplicados intencionales / multi-proyecto).
+  const someNotOk = (arr) => arr.some((c) => !c.dup_ok);
+  const dupRef = [...byRef.entries()].filter(([, arr]) => arr.length > 1 && someNotOk(arr));
 
   // 2) Por nombre + monto idénticos.
   const byNM = new Map();
@@ -1026,7 +1029,7 @@ async function auditDuplicatesFlow(refresh) {
     if (!byNM.has(k)) byNM.set(k, []);
     byNM.get(k).push(c);
   }
-  const dupNM = [...byNM.entries()].filter(([, arr]) => arr.length > 1);
+  const dupNM = [...byNM.entries()].filter(([, arr]) => arr.length > 1 && someNotOk(arr));
 
   // 3) Por nombre. Excluye multi-proyecto legítimos.
   const byName = new Map();
@@ -1036,6 +1039,7 @@ async function auditDuplicatesFlow(refresh) {
   }
   const dupName = [...byName.entries()].filter(([, arr]) => {
     if (arr.length <= 1) return false;
+    if (!someNotOk(arr)) return false;
     const refs = arr.map((c) => c.reference).filter(Boolean);
     const distinct = new Set(refs);
     const allDistinctRefs = refs.length === arr.length && distinct.size === arr.length;
@@ -1196,7 +1200,30 @@ function buildAuditSection(title, hint, groups, vendorById, selected, rowRefs, r
     group.className = "audit-group";
     const head = document.createElement("div");
     head.className = "audit-group-head";
-    head.innerHTML = `<strong>${escapeHtml(key)}</strong> · ${arr.length} clientes`;
+    const headText = document.createElement("span");
+    headText.innerHTML = `<strong>${escapeHtml(key)}</strong> · ${arr.length} clientes`;
+    head.appendChild(headText);
+
+    // Botón "Marcar grupo OK": flagea todos los clientes con dup_ok=true
+    // para que no vuelvan a aparecer en la auditoría.
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "ghost audit-ok-btn";
+    okBtn.textContent = "Marcar como OK";
+    okBtn.title = "Confirma que estos clientes no son duplicados (multi-proyecto válido). El grupo desaparecerá del auditor.";
+    okBtn.onclick = async () => {
+      const ids = arr.map((c) => c.id);
+      const { error } = await sb.from("clients").update({ dup_ok: true }).in("id", ids);
+      if (error) { toast(error.message, "error"); return; }
+      for (const id of ids) {
+        const ref = rowRefs.get(id);
+        if (ref) rowRefs.delete(id);
+      }
+      group.remove();
+      toast(`Grupo marcado como OK (${ids.length} clientes).`, "success");
+    };
+    head.appendChild(okBtn);
+
     group.appendChild(head);
 
     const list = document.createElement("ul");
