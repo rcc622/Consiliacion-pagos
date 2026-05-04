@@ -992,6 +992,7 @@ async function auditDuplicatesFlow(refresh) {
     const installments = Array.isArray(r?.installments) ? r.installments.length : 0;
     const engOk = !!(c.enganche && c.enganche_form && c.enganche_form !== "N/A" && c.enganche_date);
     const antOk = !!(c.anticipo && c.anticipo_form && c.anticipo_form !== "N/A" && c.anticipo_date);
+    c._report = r || null;
     c._data = {
       notes: !!c.notes,
       status: !!c.status,
@@ -1220,14 +1221,30 @@ function buildAuditSection(title, hint, groups, vendorById, selected, rowRefs, r
         repaintFooter();
       };
 
-      // Texto principal
+      // Texto principal — el nombre es link, abre el detalle del cliente
+      // en modo vista para revisarlo a fondo sin cerrar el auditor.
       const v = vendorById.get(c.vendor_id);
       const vendorName = v ? (v.full_name || v.email) : "—";
       const monto = c.amount != null ? fmtMoney(c.amount) : "—";
-      const ref = c.reference ? `[${escapeHtml(c.reference)}] ` : "";
       const main = document.createElement("span");
       main.className = "audit-row-main";
-      main.innerHTML = `${ref}<strong>${escapeHtml(c.name)}</strong> · ${escapeHtml(vendorName)} · ${monto}`;
+      if (c.reference) {
+        const refSpan = document.createElement("span");
+        refSpan.className = "muted";
+        refSpan.textContent = `[${c.reference}] `;
+        main.appendChild(refSpan);
+      }
+      const nameLink = document.createElement("a");
+      nameLink.href = "#";
+      nameLink.className = "row-link";
+      nameLink.textContent = c.name;
+      nameLink.title = "Ver detalle completo del cliente";
+      nameLink.onclick = (ev) => {
+        ev.preventDefault();
+        openClientDetail(c, c._report, getProfile(), () => {}, "view");
+      };
+      main.appendChild(nameLink);
+      main.appendChild(document.createTextNode(` · ${vendorName} · ${monto}`));
 
       // Badges
       const badges = buildAuditBadges(c, maxScore > 0 && c._score === maxScore);
