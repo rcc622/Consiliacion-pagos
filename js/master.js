@@ -47,6 +47,7 @@ let vendorSort = { col: null, dir: 1 };
 // `type` controla la dirección inicial al hacer click (numérico = desc).
 // `filterable` decide si el header lleva botón ▾.
 const CLIENT_COLS = [
+  { key: "reference",  label: "Referencia",     type: "string", filterable: true, value: (c) => c.reference || "—" },
   { key: "name",       label: "Cliente",        type: "string", filterable: true, value: (c) => c.name || "" },
   { key: "vendor",     label: "Vendedor",       type: "string", filterable: true, value: (c, ctx) => ctx.vendorLabel(c) },
   { key: "method",     label: "Método de pago", type: "string", filterable: true, value: (c) => c.payment_method || "—" },
@@ -451,6 +452,12 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       const status = clientStatus(c, conciliado);
       const vendorName = v ? (v.full_name || v.email) : "—";
       const vendorClass = isAsesorPlaceholder(v) ? "vendor-asesor" : "";
+
+      // Referencia (antes del nombre).
+      const tdRef = document.createElement("td");
+      tdRef.textContent = c.reference || "—";
+      if (!c.reference) tdRef.className = "muted";
+      tr.appendChild(tdRef);
 
       // Cliente: link clickeable que abre el modal en modo vista por defecto.
       const tdName = document.createElement("td");
