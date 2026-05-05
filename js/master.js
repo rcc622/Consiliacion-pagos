@@ -1723,6 +1723,7 @@ function clientStatus(client, conciliado) {
       case "Pendiente":  return { cls: "pending", label: "Pendiente" };
       case "Cancelado":  return { cls: "cancelled", label: "Cancelado" };
       case "Duplicado":  return { cls: "duplicate", label: "Duplicado" };
+      case "Revisar":    return { cls: "revisar", label: "REVISAR" };
       default:           return { cls: "partial", label: client.status };
     }
   }

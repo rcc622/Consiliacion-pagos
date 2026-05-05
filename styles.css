@@ -498,6 +498,7 @@ td.vendor-asesor {
 .badge.partial   { background: #dbeafe; color: var(--primary); }
 .badge.cancelled { background: #e5e7eb; color: #4b5563; text-decoration: line-through; }
 .badge.duplicate { background: #f3e8ff; color: #6b21a8; }
+.badge.revisar   { background: #fee2e2; color: #b91c1c; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 
 /* Vendedor placeholder ("asesor" / "asesor comercial") */
 td.vendor-asesor {
