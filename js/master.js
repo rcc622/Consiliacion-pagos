@@ -171,13 +171,20 @@ async function loadAll() {
   };
 }
 
+// Un cliente cuenta como "completado/reportado" si:
+//   - Tiene algo conciliado (total_amount > 0), O
+//   - El asesor le puso un status terminal: Activo, Conciliado, Cancelado
+//     o Duplicado. Esos cierran el caso aunque no haya pagos capturados.
+const COMPLETED_STATUSES = new Set(["Activo", "Conciliado", "Cancelado", "Duplicado"]);
+function isCompleted(client, conciliado) {
+  if ((conciliado || 0) > 0) return true;
+  return COMPLETED_STATUSES.has(client.status || "");
+}
+
 function paintTopSummary(container, clients, reports) {
   const total = clients.length;
-  // "Reportados" debe coincidir con el badge de la tabla: solo cuenta
-  // clientes con conciliado > 0. Sin esto, una fila residual en
-  // payments_report (de pruebas viejas) infla el conteo.
   const conciliadoByClient = new Map(reports.map((r) => [r.client_id, Number(r.total_amount || 0)]));
-  const reported = clients.filter((c) => (conciliadoByClient.get(c.id) || 0) > 0).length;
+  const reported = clients.filter((c) => isCompleted(c, conciliadoByClient.get(c.id))).length;
   const pct = total ? Math.round((reported / total) * 100) : 0;
   const totalAmount = reports.reduce((s, r) => s + Number(r.total_amount || 0), 0);
 
@@ -200,7 +207,7 @@ function stat(label, value) {
 
 function paintByVendor(container, vendors, clients, reports) {
   clear(container);
-  const reportedIds = new Set(reports.filter((r) => Number(r.total_amount) > 0).map((r) => r.client_id));
+  const conciliadoByClient = new Map(reports.map((r) => [r.client_id, Number(r.total_amount || 0)]));
   const amountByVendor = new Map();
   for (const r of reports) {
     amountByVendor.set(r.vendor_id, (amountByVendor.get(r.vendor_id) || 0) + Number(r.total_amount || 0));
@@ -208,7 +215,7 @@ function paintByVendor(container, vendors, clients, reports) {
 
   const rows = vendors.map((v) => {
     const own = clients.filter((c) => c.vendor_id === v.id);
-    const ownReported = own.filter((c) => reportedIds.has(c.id)).length;
+    const ownReported = own.filter((c) => isCompleted(c, conciliadoByClient.get(c.id))).length;
     const pct = own.length ? Math.round((ownReported / own.length) * 100) : 0;
     return {
       name: v.full_name || v.email,
@@ -292,7 +299,6 @@ function paintByVendor(container, vendors, clients, reports) {
 
 function paintByZone(container, clients, reports) {
   clear(container);
-  const reportedIds = new Set(reports.filter((r) => Number(r.total_amount) > 0).map((r) => r.client_id));
   const amountByClient = new Map(reports.map((r) => [r.client_id, Number(r.total_amount || 0)]));
 
   const groups = new Map();
@@ -301,7 +307,7 @@ function paintByZone(container, clients, reports) {
     if (!groups.has(key)) groups.set(key, { assigned: 0, reported: 0, amount: 0 });
     const g = groups.get(key);
     g.assigned += 1;
-    if (reportedIds.has(c.id)) g.reported += 1;
+    if (isCompleted(c, amountByClient.get(c.id))) g.reported += 1;
     g.amount += amountByClient.get(c.id) || 0;
   }
 
@@ -1185,11 +1191,39 @@ function showAuditModal({ dupRef, dupNM, dupName, vendorById, refresh }) {
     selected.clear();
     repaintFooter();
   };
+  // Marcar como Duplicado: en lugar de borrar, cambia status="Duplicado"
+  // a la selección. Útil cuando el master quiere conservar el cliente
+  // pero dejar visible que es un duplicado.
+  const bulkDup = document.createElement("button");
+  bulkDup.type = "button";
+  bulkDup.className = "ghost";
+  bulkDup.textContent = "Marcar como Duplicado";
+  bulkDup.onclick = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`¿Marcar ${selected.size} cliente(s) con status "Duplicado"?`)) return;
+    const ids = [...selected];
+    const { error } = await sb.from("clients")
+      .update({ status: "Duplicado", dup_ok: true })
+      .in("id", ids);
+    if (error) { toast(error.message, "error"); return; }
+    toast(`${ids.length} marcado(s) como Duplicado.`, "success");
+    for (const id of ids) {
+      const ref = rowRefs.get(id);
+      if (ref) {
+        ref.li.remove();
+        if (ref.list.children.length <= 1) ref.group.remove();
+        rowRefs.delete(id);
+      }
+    }
+    selected.clear();
+    repaintFooter();
+  };
+
   const close = document.createElement("button");
   close.type = "button";
   close.textContent = "Cerrar";
   close.onclick = () => { backdrop.remove(); refresh(); };
-  footer.append(counter, bulkDel, close);
+  footer.append(counter, bulkDup, bulkDel, close);
   modal.appendChild(footer);
 
   function repaintFooter() {
@@ -1197,6 +1231,7 @@ function showAuditModal({ dupRef, dupNM, dupName, vendorById, refresh }) {
       ? "0 seleccionados"
       : `${selected.size} seleccionado(s)`;
     bulkDel.disabled = selected.size === 0;
+    bulkDup.disabled = selected.size === 0;
   }
   repaintFooter();
 
@@ -1687,6 +1722,7 @@ function clientStatus(client, conciliado) {
       case "Parcial":    return { cls: "partial", label: "Parcial" };
       case "Pendiente":  return { cls: "pending", label: "Pendiente" };
       case "Cancelado":  return { cls: "cancelled", label: "Cancelado" };
+      case "Duplicado":  return { cls: "duplicate", label: "Duplicado" };
       default:           return { cls: "partial", label: client.status };
     }
   }

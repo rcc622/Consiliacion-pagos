@@ -165,6 +165,7 @@ function statusBadge(status) {
     case "Parcial":    return { cls: "partial", label: "Parcial" };
     case "Pendiente":  return { cls: "pending", label: "Pendiente" };
     case "Cancelado":  return { cls: "cancelled", label: "Cancelado" };
+    case "Duplicado":  return { cls: "duplicate", label: "Duplicado" };
     default:           return { cls: "partial", label: status };
   }
 }
@@ -779,7 +780,7 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
 // Select de estatus del cliente. Reemplaza al toggle binario "Activo".
 // Persiste en clients.status. Vacío ("Auto") = el badge se deriva del
 // conciliado vs monto.
-const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado"];
+const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado", "Duplicado"];
 // El vendedor solo puede aplicar manualmente Activo o Cancelado. Los demás
 // (Pendiente / Parcial / Conciliado) salen del derivado automático de
 // conciliado vs monto, así no se le da al asesor la opción de marcar como
