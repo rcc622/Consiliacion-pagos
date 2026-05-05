@@ -636,6 +636,11 @@ function applyModeToModal(modal, mode) {
   modal.classList.toggle("view-mode", view);
   for (const el of modal.querySelectorAll("input, select, textarea")) {
     if (el.closest("[data-role=mode-toggle]")) continue;
+    // Campos bloqueados por rol (status Conciliado/Revisar/Corregir para
+    // vendor) NO se reactivan al entrar en edit mode. Si los re-habilitamos
+    // aquí, el lock del statusPicker queda inerte y el vendor puede cambiar
+    // un status que no le toca.
+    if (el.closest(".field-locked")) { el.disabled = true; continue; }
     el.disabled = view;
   }
   for (const el of modal.querySelectorAll(".add-row-btn, .row-delete-btn")) {
