@@ -159,16 +159,42 @@ async function loadAll() {
   const [vendorsRes, clients, reports] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
     fetchAll(() => sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date")),
-    fetchAll(() => sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, updated_at")),
+    fetchAll(() => sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, installments, updated_at")),
   ]);
 
   if (vendorsRes.error) { toast(vendorsRes.error.message, "error"); throw vendorsRes.error; }
+
+  // Auto-flag: MSI sin filas capturadas → status="Revisar".
+  // Solo aplica si el status actual está vacío o es no-terminal (Pendiente
+  // / Parcial). Status terminales (Activo, Conciliado, Cancelado, Duplicado,
+  // Revisar) se respetan tal cual.
+  await autoFlagMSIRevisar(clients, reports);
 
   return {
     vendors: vendorsRes.data || [],
     clients,
     reports,
   };
+}
+
+async function autoFlagMSIRevisar(clients, reports) {
+  const reportByClient = new Map(reports.map((r) => [r.client_id, r]));
+  const overridable = new Set([null, undefined, "", "Pendiente", "Parcial"]);
+  const toFlag = clients.filter((c) => {
+    if (c.payment_method !== "MSI") return false;
+    if (!overridable.has(c.status)) return false;
+    const r = reportByClient.get(c.id);
+    const installments = Array.isArray(r?.installments) ? r.installments : [];
+    return installments.length === 0;
+  });
+  if (!toFlag.length) return;
+  const ids = toFlag.map((c) => c.id);
+  const { error } = await sb.from("clients").update({ status: "Revisar" }).in("id", ids);
+  if (error) {
+    console.warn("autoFlagMSIRevisar:", error.message);
+    return;
+  }
+  for (const c of toFlag) c.status = "Revisar";
 }
 
 // Un cliente cuenta como "completado/reportado" si:
