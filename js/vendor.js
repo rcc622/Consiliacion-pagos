@@ -818,11 +818,11 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
 // Persiste en clients.status. Vacío = el badge se deriva del conciliado vs
 // monto (el option vacío muestra esa etiqueta derivada en lugar de "Auto").
 const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado", "Duplicado", "Revisar", "Corregir"];
-// El vendedor solo puede aplicar manualmente Activo o Cancelado. Los demás
-// (Pendiente / Parcial / Conciliado) salen del derivado automático de
+// El vendedor puede aplicar manualmente Activo, Cancelado o Duplicado. Los
+// demás (Pendiente / Parcial / Conciliado) salen del derivado automático de
 // conciliado vs monto, así no se le da al asesor la opción de marcar como
 // conciliado algo que no lo está. El master sí puede usar todos.
-const VENDOR_STATUS_OPTIONS = ["Activo", "Cancelado"];
+const VENDOR_STATUS_OPTIONS = ["Activo", "Cancelado", "Duplicado"];
 // Status que el vendedor NO puede cambiar (los pone solo el master). Si el
 // cliente actual ya tiene uno de estos, su select queda deshabilitado.
 // Conciliado también está bloqueado: una vez que el master cierra el cliente,
