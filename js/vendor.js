@@ -349,6 +349,22 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
     }, { onConflict: "client_id" });
   }
 
+  // Self-heal: si total_amount guardado en payments_report no coincide con
+  // la suma actual (installments + enganche + anticipo con forma+fecha),
+  // persistimos para sincronizar. Datos viejos podían quedar inflados por
+  // bugs previos de doble conteo.
+  (function syncStoredTotal() {
+    const computed =
+      rows.filter(isPaidRow).reduce((s, r) => s + Number(r.amount || 0), 0)
+      + ((client.enganche_form && client.enganche_form !== "N/A" && client.enganche_date) ? Number(client.enganche || 0) : 0)
+      + ((client.anticipo_form && client.anticipo_form !== "N/A" && client.anticipo_date) ? Number(client.anticipo || 0) : 0);
+    const stored = Number(report?.total_amount || 0);
+    if (Math.abs(computed - stored) > 0.01) {
+      if (report) report.total_amount = computed;
+      persist();
+    }
+  })();
+
   paintInfo();
   function paintInfo() {
     clear(info);
