@@ -201,3 +201,35 @@ create policy pr_vendor_rw on public.payments_report
 create policy pr_master_all on public.payments_report
   for all using (public.current_user_role() = 'master')
   with check (public.current_user_role() = 'master');
+
+-- Lock de status sensibles --------------------------------------------------
+-- Conciliado / Revisar / Corregir solo los puede aplicar o quitar el master.
+-- Si un vendor intenta cambiarlos via UI parchada o dev tools, este trigger
+-- aborta la transacción. SECURITY DEFINER porque current_user_role() lee
+-- profiles ignorando RLS.
+create or replace function public.protect_locked_status()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.current_user_role() = 'master' then
+    return new;
+  end if;
+  if old.status is distinct from new.status then
+    if old.status in ('Conciliado','Revisar','Corregir') then
+      raise exception 'Solo el master puede modificar el status % del cliente.', old.status;
+    end if;
+    if new.status in ('Conciliado','Revisar','Corregir') then
+      raise exception 'Solo el master puede aplicar el status %.', new.status;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_protect_status on public.clients;
+create trigger trg_protect_status
+  before update on public.clients
+  for each row execute function public.protect_locked_status();

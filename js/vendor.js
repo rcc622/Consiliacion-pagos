@@ -370,12 +370,26 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
   paintInfo();
   function paintInfo() {
     clear(info);
-    const onChange = () => { refreshSummary(); persist(); };
+    const onChange = () => { refreshSummary(); persist(); paintInfo(); };
+    // Calcula el estatus que tendría el cliente si no hubiera override manual,
+    // para mostrarlo como label de la opción "vacía" del picker (en lugar de
+    // un genérico "Auto"). Refleja monto vs conciliado actual.
+    let totalPaid = rows.filter(isPaidRow).reduce((s, r) => s + Number(r.amount || 0), 0);
+    if (client.enganche_form && client.enganche_form !== "N/A" && client.enganche_date) {
+      totalPaid += Number(client.enganche || 0);
+    }
+    if (client.anticipo_form && client.anticipo_form !== "N/A" && client.anticipo_date) {
+      totalPaid += Number(client.anticipo || 0);
+    }
+    const monto = Number(client.amount || 0);
+    let derived = "Pendiente";
+    if (monto > 0 && totalPaid >= monto) derived = "Conciliado";
+    else if (totalPaid > 0) derived = "Parcial";
     info.append(
       methodPicker(client),
       moneyEditorBlock("Enganche", client, "enganche", onChange),
       moneyEditorBlock("Anticipo (opc)", client, "anticipo", onChange),
-      statusPicker(client),
+      statusPicker(client, derived),
       notesEditorBlock(client),
     );
   }
@@ -796,8 +810,8 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
 }
 
 // Select de estatus del cliente. Reemplaza al toggle binario "Activo".
-// Persiste en clients.status. Vacío ("Auto") = el badge se deriva del
-// conciliado vs monto.
+// Persiste en clients.status. Vacío = el badge se deriva del conciliado vs
+// monto (el option vacío muestra esa etiqueta derivada en lugar de "Auto").
 const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado", "Duplicado", "Revisar", "Corregir"];
 // El vendedor solo puede aplicar manualmente Activo o Cancelado. Los demás
 // (Pendiente / Parcial / Conciliado) salen del derivado automático de
@@ -806,7 +820,9 @@ const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancela
 const VENDOR_STATUS_OPTIONS = ["Activo", "Cancelado"];
 // Status que el vendedor NO puede cambiar (los pone solo el master). Si el
 // cliente actual ya tiene uno de estos, su select queda deshabilitado.
-const VENDOR_LOCKED_STATUSES = new Set(["Revisar", "Corregir"]);
+// Conciliado también está bloqueado: una vez que el master cierra el cliente,
+// el vendor no debe poder reabrirlo cambiando el status.
+const VENDOR_LOCKED_STATUSES = new Set(["Conciliado", "Revisar", "Corregir"]);
 
 // Notas dentro del modal del cliente. Ocupa el ancho completo del grid.
 // Persiste al perder foco (igual que el editor de la tabla del vendor).
@@ -847,7 +863,7 @@ function notesEditorBlock(client) {
   return wrap;
 }
 
-function statusPicker(client) {
+function statusPicker(client, derivedLabel = "Pendiente") {
   const profile = getProfile();
   const isVendor = profile?.role === "vendor";
   const allowed = isVendor ? VENDOR_STATUS_OPTIONS : STATUS_OPTIONS;
@@ -860,8 +876,15 @@ function statusPicker(client) {
   span.className = "info-label";
 
   const select = document.createElement("select");
-  select.appendChild(opt("", "Auto"));
-  for (const s of allowed) select.appendChild(opt(s, s));
+  // La opción vacía representa "sin override manual": el badge se calcula
+  // automáticamente según monto vs conciliado. La etiqueta muestra el estado
+  // derivado (Pendiente / Parcial / Conciliado) en lugar de un genérico "Auto"
+  // para que el asesor vea exactamente cómo está clasificado el cliente.
+  select.appendChild(opt("", derivedLabel));
+  for (const s of allowed) {
+    if (s === derivedLabel) continue; // ya está como "auto"
+    select.appendChild(opt(s, s));
+  }
   // Si el status actual fue puesto por master fuera del catálogo del vendor,
   // lo mostramos para que se vea (etiquetado) y no se pierda al cambiar.
   if (client.status && !allowed.includes(client.status)) {
