@@ -167,6 +167,7 @@ function statusBadge(status) {
     case "Cancelado":  return { cls: "cancelled", label: "Cancelado" };
     case "Duplicado":  return { cls: "duplicate", label: "Duplicado" };
     case "Revisar":    return { cls: "revisar", label: "REVISAR" };
+    case "Corregir":   return { cls: "corregir", label: "CORREGIR" };
     default:           return { cls: "partial", label: status };
   }
 }
@@ -797,12 +798,15 @@ function moneyEditorBlock(label, client, field, onChange = () => {}) {
 // Select de estatus del cliente. Reemplaza al toggle binario "Activo".
 // Persiste en clients.status. Vacío ("Auto") = el badge se deriva del
 // conciliado vs monto.
-const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado", "Duplicado", "Revisar"];
+const STATUS_OPTIONS = ["Pendiente", "Parcial", "Activo", "Conciliado", "Cancelado", "Duplicado", "Revisar", "Corregir"];
 // El vendedor solo puede aplicar manualmente Activo o Cancelado. Los demás
 // (Pendiente / Parcial / Conciliado) salen del derivado automático de
 // conciliado vs monto, así no se le da al asesor la opción de marcar como
 // conciliado algo que no lo está. El master sí puede usar todos.
 const VENDOR_STATUS_OPTIONS = ["Activo", "Cancelado"];
+// Status que el vendedor NO puede cambiar (los pone solo el master). Si el
+// cliente actual ya tiene uno de estos, su select queda deshabilitado.
+const VENDOR_LOCKED_STATUSES = new Set(["Revisar", "Corregir"]);
 
 // Notas dentro del modal del cliente. Ocupa el ancho completo del grid.
 // Persiste al perder foco (igual que el editor de la tabla del vendor).
@@ -864,6 +868,14 @@ function statusPicker(client) {
     select.appendChild(opt(client.status, `${client.status} (master)`));
   }
   select.value = client.status || "";
+
+  // Status bloqueados (Revisar / Corregir): el vendor no puede modificarlos;
+  // solo el master los quita o cambia.
+  if (isVendor && VENDOR_LOCKED_STATUSES.has(client.status)) {
+    select.disabled = true;
+    select.title = "Este status solo lo puede cambiar el master.";
+    wrap.classList.add("field-locked");
+  }
 
   let saving = false;
   select.addEventListener("change", async () => {

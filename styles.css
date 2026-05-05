@@ -499,6 +499,7 @@ td.vendor-asesor {
 .badge.cancelled { background: #e5e7eb; color: #4b5563; text-decoration: line-through; }
 .badge.duplicate { background: #f3e8ff; color: #6b21a8; }
 .badge.revisar   { background: #fee2e2; color: #b91c1c; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.badge.corregir  { background: #fed7aa; color: #9a3412; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 
 /* Vendedor placeholder ("asesor" / "asesor comercial") */
 td.vendor-asesor {
@@ -559,6 +560,11 @@ td.vendor-asesor {
   background: var(--bg);
   color: var(--muted);
   font-style: italic;
+}
+.client-info-grid .field-locked select {
+  background: var(--bg);
+  color: var(--muted);
+  cursor: not-allowed;
 }
 .client-info-grid .info-field-full {
   grid-column: 1 / -1;

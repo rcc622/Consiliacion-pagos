@@ -1750,6 +1750,7 @@ function clientStatus(client, conciliado) {
       case "Cancelado":  return { cls: "cancelled", label: "Cancelado" };
       case "Duplicado":  return { cls: "duplicate", label: "Duplicado" };
       case "Revisar":    return { cls: "revisar", label: "REVISAR" };
+      case "Corregir":   return { cls: "corregir", label: "CORREGIR" };
       default:           return { cls: "partial", label: client.status };
     }
   }
