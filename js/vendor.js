@@ -56,7 +56,7 @@ function headerNode(profile) {
 async function loadData() {
   const [clients, reports] = await Promise.all([
     fetchAll(() => sb.from("clients")
-      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status, enganche_form, enganche_date, anticipo_form, anticipo_date, vendor_id")
+      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status, enganche_form, enganche_date, anticipo_form, anticipo_date, medidor_bidi, vendor_id")
       .order("name")),
     fetchAll(() => sb.from("payments_report").select("client_id, total_amount, installments, updated_at")),
   ]);
@@ -390,6 +390,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       moneyEditorBlock("Enganche", client, "enganche", onChange),
       moneyEditorBlock("Anticipo (opc)", client, "anticipo", onChange),
       statusPicker(client, derived),
+      bidiCheckbox(client),
       notesEditorBlock(client),
     );
   }
@@ -865,6 +866,34 @@ function notesEditorBlock(client) {
   });
 
   wrap.append(span, ta);
+  return wrap;
+}
+
+// Checkbox: ¿el cliente ya tiene medidor bidireccional instalado? Es un dato
+// que necesita el equipo de operaciones; se persiste en clients.medidor_bidi.
+function bidiCheckbox(client) {
+  const wrap = document.createElement("label");
+  wrap.className = "info-field info-field-check";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = !!client.medidor_bidi;
+  const span = document.createElement("span");
+  span.className = "info-label";
+  span.textContent = "Medidor bidireccional instalado";
+
+  let saving = false;
+  cb.addEventListener("change", async () => {
+    if (saving) return;
+    saving = true;
+    const next = cb.checked;
+    const { error } = await sb.from("clients").update({ medidor_bidi: next }).eq("id", client.id);
+    saving = false;
+    if (error) { toast(error.message, "error"); cb.checked = !!client.medidor_bidi; return; }
+    client.medidor_bidi = next;
+    toast(next ? "Medidor bidireccional: sí" : "Medidor bidireccional: no", "success", 1500);
+  });
+
+  wrap.append(cb, span);
   return wrap;
 }
 

@@ -569,6 +569,26 @@ td.vendor-asesor {
 .client-info-grid .info-field-full {
   grid-column: 1 / -1;
 }
+.client-info-grid .info-field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  align-self: end;
+  padding-bottom: 6px;
+}
+.client-info-grid .info-field-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+.client-info-grid .info-field-check .info-label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: var(--text);
+}
 .client-info-grid .modal-notes-editor {
   font: inherit;
   width: 100%;

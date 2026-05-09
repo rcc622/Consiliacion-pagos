@@ -158,7 +158,7 @@ async function loadAll() {
   // no quedarnos cortos en el límite default del PostgREST.
   const [vendorsRes, clients, reports] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    fetchAll(() => sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date")),
+    fetchAll(() => sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date, medidor_bidi")),
     fetchAll(() => sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, installments, updated_at")),
   ]);
 
