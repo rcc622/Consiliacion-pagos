@@ -981,3 +981,63 @@ a.row-link:hover { text-decoration: underline; }
   main#app { padding: 16px; }
   th, td { padding: 8px 10px; }
 }
+
+/* === Optimizaciones para pantallas de baja resolución vertical ===========
+   Laptops con 768px o menos de alto (incl. 480p) sufren con el modal de
+   detalle: la suma de header + stats + info-grid + tabla + footer pasa el
+   viewport. Aquí compactamos paddings y aumentamos max-height para usar
+   más espacio. */
+
+@media (max-height: 800px) {
+  .modal.detail-modal {
+    max-height: 94vh;
+    padding: 14px 18px;
+    gap: 8px;
+  }
+  .detail-modal .summary { margin-bottom: 6px; }
+  .detail-modal .summary .stat { padding: 6px 10px; }
+  .detail-modal .summary .stat .label { font-size: 10px; }
+  .detail-modal .summary .stat .value { font-size: 14px; }
+  .client-info-title { margin: 2px 0; font-size: 11px; }
+  .client-info-grid {
+    padding: 6px 0;
+    gap: 6px 12px;
+    margin-bottom: 4px;
+  }
+  .detail-schedule { max-height: 32vh; }
+  .pay-head { padding: 4px 0; }
+  .pay-title { font-size: 13px; }
+  .detail-modal .actions { padding: 6px 18px; margin: 4px -18px -14px; }
+}
+
+@media (max-height: 600px) {
+  .modal.detail-modal {
+    max-height: 96vh;
+    padding: 10px 14px;
+    gap: 6px;
+  }
+  .detail-header { margin-bottom: 0; }
+  .detail-header h2 { font-size: 16px; }
+  .mode-toggle { font-size: 11px; padding: 3px 8px; }
+  .detail-modal .summary { gap: 6px; margin-bottom: 4px; }
+  .detail-modal .summary .stat { padding: 4px 8px; }
+  .detail-modal .summary .stat .label { font-size: 9px; }
+  .detail-modal .summary .stat .value { font-size: 13px; }
+  .client-info-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 4px 0;
+    gap: 4px 10px;
+  }
+  .client-info-grid .info-label { font-size: 10px; }
+  .client-info-grid input,
+  .client-info-grid select { padding: 4px 6px; font-size: 12px; }
+  .client-info-grid .modal-notes-editor { min-height: 36px; max-height: 60px; }
+  .client-info-grid .info-sub { font-size: 10px; }
+  .detail-schedule { max-height: 28vh; }
+  .detail-schedule th,
+  .detail-schedule td { padding: 4px 6px; font-size: 12px; }
+  .detail-schedule input,
+  .detail-schedule select { padding: 3px 5px; font-size: 12px; }
+  .detail-modal .actions { padding: 4px 14px; margin: 2px -14px -10px; }
+  .detail-modal .actions button { padding: 6px 12px; font-size: 13px; }
+}
