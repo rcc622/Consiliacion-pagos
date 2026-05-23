@@ -901,6 +901,11 @@ a.row-link:hover { text-decoration: underline; }
 
 .detail-schedule {
   margin-top: 4px;
+  /* Anula el overflow-x del .table-wrap base. Dentro del modal queremos
+     que el scroll lo maneje el contenedor del modal, no la tabla. */
+  overflow: visible;
+  border: none;
+  background: transparent;
 }
 .detail-schedule thead th {
   position: sticky;
