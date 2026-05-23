@@ -306,16 +306,21 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
   info.className = "client-info-grid";
   modal.appendChild(info);
 
-  // Pagos capturados header con botón Agregar fila
+  // Header de sección "Pagos capturados". El botón "+ Agregar fila" vive
+  // dentro de la tabla (última fila si hay datos, o empty state si no) para
+  // que haya solo un punto de entrada y siempre quede visible junto a las
+  // filas existentes.
   const payHead = document.createElement("div");
   payHead.className = "pay-head";
   const payTitle = document.createElement("h3");
   payTitle.textContent = "Pagos capturados";
   payTitle.className = "pay-title";
+  // addBtn ya no se muestra en el DOM, pero se mantiene como elemento para
+  // reusar su click handler desde el empty-state y el footer de la tabla.
   const addBtn = document.createElement("button");
   addBtn.type = "button";
-  addBtn.className = "ghost add-row-btn";
-  addBtn.textContent = "+ Agregar fila";
+  addBtn.className = "add-row-btn";
+  addBtn.hidden = true;
   payHead.append(payTitle, addBtn);
   modal.appendChild(payHead);
 
@@ -500,9 +505,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
 
     clear(tbody);
     if (rows.length === 0) {
-      // Empty state clickeable: el botón principal queda arriba del modal y
-      // si la pantalla es chica puede no estar visible. Aquí dentro de la
-      // tabla damos una segunda manera de agregar fila, sin scroll.
+      // Empty state con botón clickeable real.
       const empty = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = 5;
@@ -520,6 +523,20 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       rows.slice(start, end).forEach((r, i) => {
         tbody.appendChild(buildRow(r, start + i + 1));
       });
+      // Footer row: "+ Agregar fila" siempre disponible debajo de los pagos.
+      const addRow = document.createElement("tr");
+      const addTd = document.createElement("td");
+      addTd.colSpan = 5;
+      addTd.className = "empty-add-cell";
+      addTd.style.textAlign = "center";
+      const addRowBtn = document.createElement("button");
+      addRowBtn.type = "button";
+      addRowBtn.className = "ghost add-row-btn empty-add-btn";
+      addRowBtn.textContent = "+ Agregar fila";
+      addRowBtn.onclick = () => addBtn.click();
+      addTd.appendChild(addRowBtn);
+      addRow.appendChild(addTd);
+      tbody.appendChild(addRow);
     }
     paintPagination();
     applyModeToModal(modal, currentMode);

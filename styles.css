@@ -861,6 +861,9 @@ a.row-link:hover { text-decoration: underline; }
   background: var(--bg);
   cursor: not-allowed;
 }
+/* En modo vista escondemos la fila completa del botón "+ Agregar fila"
+   (no solo el botón), para que no quede un tr vacío. */
+.view-mode tr:has(.empty-add-btn) { display: none; }
 
 .detail-meta {
   display: grid;
