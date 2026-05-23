@@ -12,6 +12,29 @@
 import { sb, fetchAll } from "./supabase.js";
 import { clear, toast, fmtMoney } from "./ui.js";
 import { getProfile } from "./auth.js";
+import {
+  createFilterState,
+  buildSearchBar,
+  buildFilterableHeader,
+  applyFilters,
+  applySort,
+  paintSortIndicators,
+} from "./table-filters.js";
+
+// Filtros + sort + búsqueda. Estado a nivel de módulo para que persista
+// entre re-renders (igual que en la vista master).
+const filterState = createFilterState();
+
+// Metadata de columnas: orden visual + extractor de valor para sort/filter.
+const VENDOR_COLS = [
+  { key: "name",       label: "Cliente",        type: "string", value: (c) => c.name || "" },
+  { key: "inherited",  label: "Heredado",       type: "string", value: (c) => c.inherited_from || "" },
+  { key: "method",     label: "Método de pago", type: "string", value: (c) => c.payment_method || "—" },
+  { key: "amount",     label: "Monto Proyecto", type: "number", value: (c) => Number(c.amount || 0) },
+  { key: "conciliado", label: "Conciliado",     type: "number", value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
+  { key: "status",     label: "Estado",         type: "string", value: (c, ctx) => clientEffectiveStatus(c, Number(ctx.reportFor(c)?.total_amount || 0)).label },
+  { key: "notes",      label: "Notas",          type: "string", value: (c) => c.notes || "" },
+];
 
 const PAYMENT_FORMS = ["Efectivo", "Transferencia", "Link de pago"];
 const METHODS = [
@@ -90,28 +113,38 @@ function stat(label, value, kind = "") {
 function paintTable(container, clients, reports, profile, refresh) {
   clear(container);
   const reportByClient = new Map(reports.map((r) => [r.client_id, r]));
+  const ctx = { reportFor: (c) => reportByClient.get(c.id) };
+
+  // Buscador por nombre (igual que en master).
+  container.appendChild(buildSearchBar(filterState, () => repaintBody()));
 
   const table = document.createElement("table");
   const thead = document.createElement("thead");
-  thead.innerHTML = `
-    <tr>
-      <th>Cliente</th>
-      <th>Heredado</th>
-      <th>Método de pago</th>
-      <th>Monto Proyecto</th>
-      <th>Conciliado</th>
-      <th>Estado</th>
-      <th>Notas</th>
-    </tr>`;
+  const trh = document.createElement("tr");
+  for (const col of VENDOR_COLS) {
+    const th = document.createElement("th");
+    th.dataset.col = col.key;
+    th.appendChild(buildFilterableHeader(col, clients, ctx, filterState, () => repaintBody()));
+    trh.appendChild(th);
+  }
+  thead.appendChild(trh);
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
-  for (const c of clients) {
-    const r = reportByClient.get(c.id);
-    tbody.appendChild(rowFor(c, r, profile, refresh));
-  }
   table.appendChild(tbody);
   container.appendChild(table);
+
+  function repaintBody() {
+    paintSortIndicators(thead, VENDOR_COLS, filterState);
+    const filtered = applyFilters(clients, ctx, VENDOR_COLS, filterState, "name");
+    const sorted = applySort(filtered, ctx, VENDOR_COLS, filterState);
+    clear(tbody);
+    for (const c of sorted) {
+      const r = reportByClient.get(c.id);
+      tbody.appendChild(rowFor(c, r, profile, refresh));
+    }
+  }
+  repaintBody();
 }
 
 function rowFor(client, report, profile, refresh) {

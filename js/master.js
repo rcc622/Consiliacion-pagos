@@ -3,6 +3,14 @@
 import { sb, fetchAll } from "./supabase.js";
 import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
 import { parseFile, importRows, parseForBackfill } from "./import.js";
+import {
+  createFilterState,
+  buildSearchBar as buildSharedSearchBar,
+  buildFilterableHeader as buildSharedFilterableHeader,
+  applyFilters as applySharedFilters,
+  applySort as applySharedSort,
+  paintSortIndicators as paintSharedSortIndicators,
+} from "./table-filters.js";
 import { exportConciliation } from "./export.js";
 import { openClientDetail } from "./vendor.js";
 import { getProfile } from "./auth.js";
@@ -36,11 +44,7 @@ function catalogOptions(catalog, currentValue) {
 }
 
 let selected = new Set();
-let clientSearch = "";
-// Per-column allowlists. null/undefined = sin filtro (todos pasan).
-// Set vacío = nada pasa. Set con valores = solo esos.
-let columnFilters = {};
-let clientSort = { col: null, dir: 1 };
+const filterState = createFilterState();
 let vendorSort = { col: null, dir: 1 };
 
 // Columnas de la tabla "Clientes": metadata para sort + filter.
@@ -386,7 +390,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
 
   // Barra superior: solo el buscador libre. Los filtros por valor viven
   // en cada header como popover.
-  const filterBar = buildClientSearchBar(() => repaintBody());
+  const filterBar = buildSharedSearchBar(filterState, () => repaintBody());
   container.appendChild(filterBar);
 
   // Barra de seleccion (solo se muestra cuando hay >=1 marcado)
@@ -412,7 +416,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
     th.dataset.col = col.key;
 
     if (col.filterable) {
-      th.appendChild(buildFilterableHeader(col, clients, filterCtx, () => repaintBody()));
+      th.appendChild(buildSharedFilterableHeader(col, clients, filterCtx, filterState, () => repaintBody()));
     } else {
       const labelSpan = document.createElement("span");
       labelSpan.className = "th-label";
@@ -433,13 +437,7 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   container.appendChild(tableEl);
 
   function paintSortIndicators() {
-    for (const col of CLIENT_COLS) {
-      const th = thead.querySelector(`th[data-col="${col.key}"]`);
-      if (!th) continue;
-      const labelSpan = th.querySelector(".th-label");
-      const arrow = clientSort.col === col.key ? (clientSort.dir === 1 ? " ▲" : " ▼") : "";
-      if (labelSpan) labelSpan.textContent = col.label + arrow;
-    }
+    paintSharedSortIndicators(thead, CLIENT_COLS, filterState);
   }
   paintSortIndicators();
 
@@ -473,8 +471,8 @@ function paintDetail(container, vendors, clients, reports, refresh) {
 
   function repaintBody() {
     paintSortIndicators();
-    const filtered = applyClientFilters(clients, filterCtx);
-    const sorted = applyClientSort(filtered, filterCtx);
+    const filtered = applySharedFilters(clients, filterCtx, FILTERABLE_COLS, filterState, "name");
+    const sorted = applySharedSort(filtered, filterCtx, CLIENT_COLS, filterState);
     clear(tbody);
     rowChecks = [];
 
@@ -592,255 +590,8 @@ function paintDetail(container, vendors, clients, reports, refresh) {
   repaintSelBar();
 }
 
-function buildClientSearchBar(onChange) {
-  const bar = document.createElement("div");
-  bar.className = "filter-bar";
-
-  const wrap = document.createElement("div");
-  wrap.className = "search-input";
-  const icon = document.createElement("span");
-  icon.className = "search-icon";
-  icon.textContent = "🔍";
-  const input = document.createElement("input");
-  input.type = "search";
-  input.placeholder = "Buscar cliente por nombre…";
-  input.value = clientSearch;
-  input.oninput = () => { clientSearch = input.value; onChange(); };
-  wrap.append(icon, input);
-  bar.appendChild(wrap);
-
-  return bar;
-}
-
-// Construye el header de una columna filtrable: label + botón ▾ que abre
-// un popover con checkboxes de los valores únicos de esa columna.
-function buildFilterableHeader(col, clients, ctx, onChange) {
-  const wrap = document.createElement("div");
-  wrap.className = "th-filterable";
-
-  const lbl = document.createElement("span");
-  lbl.className = "th-label";
-  lbl.textContent = col.label;
-  wrap.appendChild(lbl);
-
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "th-filter-btn";
-  btn.title = "Filtrar";
-  btn.textContent = "▾";
-  btn.onclick = (ev) => {
-    ev.stopPropagation();
-    openColumnFilterPopover(btn, col, clients, ctx, () => {
-      paintActive();
-      onChange();
-    });
-  };
-  wrap.appendChild(btn);
-
-  function paintActive() {
-    const active = columnFilters[col.key] != null;
-    btn.classList.toggle("active", active);
-  }
-  paintActive();
-
-  return wrap;
-}
-
-function openColumnFilterPopover(anchor, col, clients, ctx, onChange) {
-  // Cerrar otros popovers abiertos
-  document.querySelectorAll(".filter-popover").forEach((p) => p.remove());
-
-  const isNumeric = col.type === "number";
-  const values = [...new Set(clients.map((c) => col.value(c, ctx)))]
-    .sort((a, b) => isNumeric
-      ? (Number(a) || 0) - (Number(b) || 0)
-      : String(a).localeCompare(String(b)));
-
-  const current = columnFilters[col.key];
-  const selected = new Set(current || values);
-
-  const pop = document.createElement("div");
-  pop.className = "filter-popover";
-
-  // Acciones de orden (estilo Google Sheets) — al hacer click, ordenan la
-  // tabla por esta columna y cierran el popover.
-  const sortHead = document.createElement("div");
-  sortHead.className = "popover-sort";
-  const sortAsc = document.createElement("button");
-  sortAsc.type = "button";
-  sortAsc.className = "popover-link";
-  sortAsc.innerHTML = isNumeric
-    ? `<span class="popover-link-icon">↑</span> Ordenar de menor a mayor`
-    : `<span class="popover-link-icon">↑</span> Ordenar A → Z`;
-  sortAsc.onclick = () => {
-    clientSort.col = col.key;
-    clientSort.dir = 1;
-    pop.remove();
-    onChange();
-  };
-  const sortDesc = document.createElement("button");
-  sortDesc.type = "button";
-  sortDesc.className = "popover-link";
-  sortDesc.innerHTML = isNumeric
-    ? `<span class="popover-link-icon">↓</span> Ordenar de mayor a menor`
-    : `<span class="popover-link-icon">↓</span> Ordenar Z → A`;
-  sortDesc.onclick = () => {
-    clientSort.col = col.key;
-    clientSort.dir = -1;
-    pop.remove();
-    onChange();
-  };
-  sortHead.append(sortAsc, sortDesc);
-  pop.appendChild(sortHead);
-
-  // Toolbar: links "Seleccionar todo · Borrar" + contador
-  const toolbar = document.createElement("div");
-  toolbar.className = "popover-toolbar";
-  const selAll = document.createElement("a");
-  selAll.href = "#";
-  selAll.className = "popover-link-text";
-  selAll.textContent = "Seleccionar todo";
-  selAll.onclick = (ev) => { ev.preventDefault(); for (const v of values) selected.add(v); renderList(); };
-  const dot = document.createElement("span");
-  dot.className = "muted";
-  dot.textContent = " · ";
-  const clearAll = document.createElement("a");
-  clearAll.href = "#";
-  clearAll.className = "popover-link-text";
-  clearAll.textContent = "Borrar";
-  clearAll.onclick = (ev) => { ev.preventDefault(); selected.clear(); renderList(); };
-  const count = document.createElement("span");
-  count.className = "popover-count muted";
-  toolbar.append(selAll, dot, clearAll, count);
-  pop.appendChild(toolbar);
-
-  // Search
-  const searchWrap = document.createElement("div");
-  searchWrap.className = "popover-search-wrap";
-  const searchIcon = document.createElement("span");
-  searchIcon.className = "popover-search-icon";
-  searchIcon.textContent = "🔍";
-  const search = document.createElement("input");
-  search.type = "search";
-  search.className = "popover-search";
-  search.placeholder = "Buscar valor…";
-  searchWrap.append(searchIcon, search);
-  pop.appendChild(searchWrap);
-
-  // Lista de valores
-  const list = document.createElement("div");
-  list.className = "popover-list";
-  pop.appendChild(list);
-
-  function displayVal(v) {
-    if (isNumeric) return v ? fmtMoney(v) : "—";
-    if (v === "" || v == null) return "—";
-    return String(v);
-  }
-
-  function renderList() {
-    clear(list);
-    const q = search.value.trim().toLowerCase();
-    const visible = q ? values.filter((v) => {
-      const raw = String(v).toLowerCase();
-      const disp = displayVal(v).toLowerCase();
-      return raw.includes(q) || disp.includes(q);
-    }) : values;
-    for (const val of visible) {
-      const row = document.createElement("label");
-      row.className = "popover-row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = selected.has(val);
-      cb.onchange = () => {
-        if (cb.checked) selected.add(val);
-        else selected.delete(val);
-        renderList();
-      };
-      const txt = document.createElement("span");
-      txt.textContent = displayVal(val);
-      row.append(cb, txt);
-      list.appendChild(row);
-    }
-    if (!visible.length) {
-      const empty = document.createElement("div");
-      empty.className = "popover-empty muted";
-      empty.textContent = "Sin coincidencias";
-      list.appendChild(empty);
-    }
-    count.textContent = `Mostrando ${visible.length}`;
-  }
-  renderList();
-  search.oninput = renderList;
-
-  // Footer: cancelar / aplicar
-  const footer = document.createElement("div");
-  footer.className = "popover-footer";
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "ghost";
-  cancelBtn.textContent = "Cancelar";
-  cancelBtn.onclick = () => { pop.remove(); };
-  const applyBtn = document.createElement("button");
-  applyBtn.type = "button";
-  applyBtn.textContent = "Aceptar";
-  applyBtn.onclick = () => {
-    if (selected.size === values.length) {
-      delete columnFilters[col.key];
-    } else {
-      columnFilters[col.key] = selected;
-    }
-    pop.remove();
-    onChange();
-  };
-  footer.append(cancelBtn, applyBtn);
-  pop.appendChild(footer);
-
-  // Posicionar bajo el botón
-  document.body.appendChild(pop);
-  const rect = anchor.getBoundingClientRect();
-  pop.style.position = "absolute";
-  pop.style.top  = `${rect.bottom + window.scrollY + 4}px`;
-  pop.style.left = `${rect.left + window.scrollX}px`;
-
-  // Cerrar al click fuera
-  function onDocClick(ev) {
-    if (!pop.contains(ev.target) && ev.target !== anchor) {
-      pop.remove();
-      document.removeEventListener("mousedown", onDocClick);
-    }
-  }
-  setTimeout(() => document.addEventListener("mousedown", onDocClick), 0);
-
-  search.focus();
-}
-
-function applyClientFilters(clients, ctx) {
-  const q = clientSearch.trim().toLowerCase();
-  return clients.filter((c) => {
-    if (q && !String(c.name || "").toLowerCase().includes(q)) return false;
-    for (const col of FILTERABLE_COLS) {
-      const allowed = columnFilters[col.key];
-      if (!allowed) continue;
-      const v = col.value(c, ctx);
-      if (!allowed.has(v)) return false;
-    }
-    return true;
-  });
-}
-
-function applyClientSort(clients, ctx) {
-  if (!clientSort.col) return clients;
-  const col = CLIENT_COLS.find((c) => c.key === clientSort.col);
-  if (!col) return clients;
-  const dir = clientSort.dir;
-  return [...clients].sort((a, b) => {
-    const av = col.value(a, ctx);
-    const bv = col.value(b, ctx);
-    if (col.type === "number") return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
-    return String(av).localeCompare(String(bv)) * dir;
-  });
-}
+// (Filtros / sort / popover de columnas viven en table-filters.js — se
+// comparten entre vista master y vista vendor.)
 
 async function editClientFlow(client, vendors, refresh) {
   const data = await openModal({
