@@ -57,6 +57,7 @@ const CLIENT_COLS = [
   { key: "conciliado", label: "Conciliado",     type: "number", filterable: true, value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
   { key: "status",     label: "Estado",         type: "string", filterable: true, value: (c, ctx) => ctx.statusLabel(c) },
   { key: "notes",      label: "Notas",          type: "string", filterable: true, value: (c) => c.notes || "" },
+  { key: "inherited",  label: "Heredado de",    type: "string", filterable: true, value: (c) => c.inherited_from || "" },
 ];
 
 const FILTERABLE_COLS = CLIENT_COLS.filter((c) => c.filterable);
@@ -536,6 +537,17 @@ function paintDetail(container, vendors, clients, reports, refresh) {
       // Notas: celda con truncado a 1 línea + botón "Ver" si el texto se
       // pasa. Mantiene la fila compacta sin importar el largo de la nota.
       tr.appendChild(buildNotesCell(c.notes || ""));
+
+      // Heredado de: vendedor original cuando el cliente fue transferido.
+      const tdInh = document.createElement("td");
+      if (c.inherited_from) {
+        tdInh.textContent = c.inherited_from;
+        tdInh.className = "origin-inherited";
+      } else {
+        tdInh.textContent = "—";
+        tdInh.className = "muted";
+      }
+      tr.appendChild(tdInh);
 
       const tdActions = document.createElement("td");
       tdActions.style.whiteSpace = "nowrap";
