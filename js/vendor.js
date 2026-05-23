@@ -500,12 +500,20 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
 
     clear(tbody);
     if (rows.length === 0) {
+      // Empty state clickeable: el botón principal queda arriba del modal y
+      // si la pantalla es chica puede no estar visible. Aquí dentro de la
+      // tabla damos una segunda manera de agregar fila, sin scroll.
       const empty = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = 5;
-      td.className = "muted center";
+      td.className = "muted center empty-add-cell";
       td.style.textAlign = "center";
-      td.textContent = "Sin pagos capturados. Click en + Agregar fila.";
+      const emptyBtn = document.createElement("button");
+      emptyBtn.type = "button";
+      emptyBtn.className = "ghost add-row-btn empty-add-btn";
+      emptyBtn.textContent = "+ Agregar primera fila";
+      emptyBtn.onclick = () => addBtn.click();
+      td.append("Sin pagos capturados. ", emptyBtn);
       empty.appendChild(td);
       tbody.appendChild(empty);
     } else {

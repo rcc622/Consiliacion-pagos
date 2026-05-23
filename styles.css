@@ -764,11 +764,19 @@ td.vendor-asesor {
 }
 
 /* Header de sección "Pagos capturados" + botón Agregar fila */
+/* Sticky dentro del modal scroll para que el botón "Agregar fila" no se
+   pierda al hacer scroll en pantallas chicas. */
 .pay-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin: 6px 0 4px;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  padding: 6px 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--border);
 }
 .pay-title {
   font-size: 14px;
@@ -776,6 +784,32 @@ td.vendor-asesor {
   color: var(--text);
 }
 .pay-head button { padding: 6px 12px; font-size: 13px; }
+/* Botón "+ Agregar primera fila" dentro de la fila vacía: estilo más
+   prominente que el texto plano anterior. */
+.empty-add-cell { padding: 18px 12px !important; }
+.empty-add-btn {
+  margin-left: 8px;
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+.empty-add-btn:hover {
+  background: var(--primary);
+  color: white;
+}
+
+/* Footer sticky del modal de detalle: el botón "Cerrar y guardar" debe
+   estar siempre visible aunque el contenido se extienda. Mismo patrón
+   que .audit-footer (negative side margins para bleed dentro del padding). */
+.detail-modal .actions {
+  position: sticky;
+  bottom: -24px;
+  margin: 8px -24px -24px;
+  padding: 10px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 2;
+}
 
 a.row-link {
   color: var(--primary);
