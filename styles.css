@@ -808,14 +808,34 @@ a.row-link {
 }
 a.row-link:hover { text-decoration: underline; }
 
-/* Modal de detalle: scroll único en el contenedor (no scroll independiente
-   en secciones internas). El layout es flex-column para que header/footer
-   queden en su lugar, pero todo el modal scrollea como un solo bloque. */
+/* Modal de detalle: scroll único en el contenedor. Todo el contenido del
+   modal scrollea como un solo bloque. overflow-y: scroll (no auto) para
+   que el scrollbar sea siempre visible y el usuario sepa que puede
+   deslizar — antes con auto el browser lo escondía si el contenido casi
+   cabía y resultaba confuso. */
 .modal.detail-modal {
   width: 720px;
   max-width: 92vw;
   max-height: 86vh;
-  overflow-y: auto;
+  overflow-y: scroll;
+  /* Scrollbar fina en Firefox + color visible */
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) transparent;
+}
+/* Scrollbar visible y prominente en navegadores WebKit (Chrome/Edge/Safari).
+   Más grueso que el default + color azul primario para que quede claro. */
+.modal.detail-modal::-webkit-scrollbar { width: 12px; }
+.modal.detail-modal::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 6px;
+}
+.modal.detail-modal::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 6px;
+  border: 2px solid var(--surface);
+}
+.modal.detail-modal::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-hover, var(--primary));
 }
 
 .detail-header {
