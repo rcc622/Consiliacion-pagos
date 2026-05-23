@@ -56,7 +56,7 @@ function headerNode(profile) {
 async function loadData() {
   const [clients, reports] = await Promise.all([
     fetchAll(() => sb.from("clients")
-      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status, enganche_form, enganche_date, anticipo_form, anticipo_date, medidor_bidi, vendor_id")
+      .select("id, name, payment_method, amount, enganche, anticipo, notes, is_active, reference, status, enganche_form, enganche_date, anticipo_form, anticipo_date, medidor_bidi, inherited_from, vendor_id")
       .order("name")),
     fetchAll(() => sb.from("payments_report").select("client_id, total_amount, installments, updated_at")),
   ]);
@@ -96,6 +96,7 @@ function paintTable(container, clients, reports, profile, refresh) {
   thead.innerHTML = `
     <tr>
       <th>Cliente</th>
+      <th>Origen</th>
       <th>Método de pago</th>
       <th>Monto Proyecto</th>
       <th>Conciliado</th>
@@ -124,6 +125,16 @@ function rowFor(client, report, profile, refresh) {
   link.onclick = (ev) => { ev.preventDefault(); openClientDetail(client, report, profile, refresh); };
   tdName.appendChild(link);
 
+  const tdOrigin = document.createElement("td");
+  if (client.inherited_from) {
+    tdOrigin.textContent = client.inherited_from;
+    tdOrigin.className = "origin-inherited";
+    tdOrigin.title = `Cliente heredado de ${client.inherited_from}`;
+  } else {
+    tdOrigin.textContent = "Propio";
+    tdOrigin.className = "muted";
+  }
+
   const tdMethod  = document.createElement("td"); tdMethod.textContent  = client.payment_method || "—";
   const tdAmount  = document.createElement("td"); tdAmount.textContent  = client.amount != null ? fmtMoney(client.amount) : "—";
 
@@ -139,7 +150,7 @@ function rowFor(client, report, profile, refresh) {
   const tdNotes = document.createElement("td");
   tdNotes.appendChild(notesEditor(client));
 
-  tr.append(tdName, tdMethod, tdAmount, tdConc, tdStatus, tdNotes);
+  tr.append(tdName, tdOrigin, tdMethod, tdAmount, tdConc, tdStatus, tdNotes);
   return tr;
 }
 
@@ -391,6 +402,7 @@ export function openClientDetail(client, report, profile, refresh, mode = "edit"
       moneyEditorBlock("Anticipo (opc)", client, "anticipo", onChange),
       statusPicker(client, derived),
       bidiCheckbox(client),
+      inheritedFromBlock(client),
       notesEditorBlock(client),
     );
   }
@@ -866,6 +878,53 @@ function notesEditorBlock(client) {
   });
 
   wrap.append(span, ta);
+  return wrap;
+}
+
+// Campo "Heredado de": indica al vendor actual de qué vendedor original le
+// transfirieron el cliente. Editable solo por master; el vendor lo ve en
+// solo-lectura. El master lo llena vía el backfill por CSV o a mano aquí.
+function inheritedFromBlock(client) {
+  const profile = getProfile();
+  const isMaster = profile?.role === "master";
+  const wrap = document.createElement("label");
+  wrap.className = "info-field";
+  const span = document.createElement("span");
+  span.className = "info-label";
+  span.textContent = "Heredado de";
+
+  if (!isMaster) {
+    const ro = document.createElement("div");
+    ro.className = "info-readonly";
+    ro.textContent = client.inherited_from || "— (propio)";
+    if (!client.inherited_from) ro.classList.add("muted");
+    wrap.append(span, ro);
+    return wrap;
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "Vendedor original (opcional)";
+  input.value = client.inherited_from || "";
+
+  let saving = false;
+  input.addEventListener("blur", async () => {
+    if (saving) return;
+    const next = input.value.trim() || null;
+    if ((client.inherited_from ?? null) === (next ?? null)) return;
+    saving = true;
+    const { error } = await sb.from("clients").update({ inherited_from: next }).eq("id", client.id);
+    saving = false;
+    if (error) { toast(error.message, "error"); input.value = client.inherited_from || ""; return; }
+    client.inherited_from = next;
+    toast(next ? `Heredado de: ${next}` : "Origen limpiado", "success", 1500);
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+    if (ev.key === "Escape") { input.value = client.inherited_from || ""; input.blur(); }
+  });
+
+  wrap.append(span, input);
   return wrap;
 }
 

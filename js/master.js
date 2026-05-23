@@ -2,7 +2,7 @@
 
 import { sb, fetchAll } from "./supabase.js";
 import { clear, toast, openModal, confirmDialog, fmtMoney } from "./ui.js";
-import { parseFile, importRows } from "./import.js";
+import { parseFile, importRows, parseForBackfill } from "./import.js";
 import { exportConciliation } from "./export.js";
 import { openClientDetail } from "./vendor.js";
 import { getProfile } from "./auth.js";
@@ -135,6 +135,12 @@ function buildToolbar(refresh) {
   auditBtn.textContent = "Auditar duplicados";
   auditBtn.onclick = () => auditDuplicatesFlow(refresh);
 
+  const backfillBtn = document.createElement("button");
+  backfillBtn.className = "ghost";
+  backfillBtn.textContent = "Backfill origen";
+  backfillBtn.title = "Sube los CSV originales para poblar el campo 'Heredado de' por matcheo. NO crea clientes.";
+  backfillBtn.onclick = () => backfillInheritedFlow(refresh);
+
   const backupBtn = document.createElement("button");
   backupBtn.className = "ghost";
   backupBtn.textContent = "Backup";
@@ -149,7 +155,7 @@ function buildToolbar(refresh) {
   wipeBtn.textContent = "Vaciar lista";
   wipeBtn.onclick = () => bulkDeleteFlow(refresh);
 
-  bar.append(importBtn, addBtn, exportXlsxBtn, exportCsvBtn, auditBtn, backupBtn, spacer, wipeBtn);
+  bar.append(importBtn, addBtn, exportXlsxBtn, exportCsvBtn, auditBtn, backfillBtn, backupBtn, spacer, wipeBtn);
   return bar;
 }
 
@@ -158,7 +164,7 @@ async function loadAll() {
   // no quedarnos cortos en el límite default del PostgREST.
   const [vendorsRes, clients, reports] = await Promise.all([
     sb.from("profiles").select("id, email, full_name, zone, role").eq("role", "vendor"),
-    fetchAll(() => sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date, medidor_bidi")),
+    fetchAll(() => sb.from("clients").select("id, name, zone, vendor_id, payment_month, payment_method, amount, enganche, anticipo, notes, due_date, reference, is_active, status, enganche_form, enganche_date, anticipo_form, anticipo_date, medidor_bidi, inherited_from")),
     fetchAll(() => sb.from("payments_report").select("client_id, vendor_id, months_paid, total_amount, installments, updated_at")),
   ]);
 
@@ -1740,6 +1746,268 @@ async function reassignFlow(ids, vendors, refresh) {
 }
 
 // El status manual del asesor (clients.status) gana sobre el derivado.
+// === Backfill de inherited_from desde CSV ==================================
+//
+// IMPORTANTE: este flujo NO inserta ni borra clientes. Solo lee los CSV
+// originales, matchea cada fila contra los clientes existentes en BD
+// (por referencia → fallback nombre+monto) y actualiza inherited_from si
+// está vacío. Si ya tiene valor, se omite (regla de Samuel: no sobreescribir).
+async function backfillInheritedFlow(refresh) {
+  const files = await pickBackfillFiles();
+  if (!files || !files.length) return;
+
+  let parsed = [];
+  for (const f of files) {
+    try {
+      const rows = await parseForBackfill(f);
+      for (const r of rows) parsed.push({ ...r, _source: f.name });
+    } catch (e) {
+      toast(`Error leyendo ${f.name}: ${e.message}`, "error");
+      return;
+    }
+  }
+  if (!parsed.length) { toast("Los archivos no tienen filas válidas.", "error"); return; }
+
+  // Snapshot de clientes para matchear. Trae los campos justos.
+  const clients = await fetchAll(() => sb.from("clients")
+    .select("id, name, reference, amount, inherited_from, vendor_id"));
+
+  // Índices: por referencia (primario) y por nombre+monto (fallback).
+  const byRef = new Map();
+  const byNameAmt = new Map();
+  const byName = new Map();
+  for (const c of clients) {
+    if (c.reference) byRef.set(c.reference.trim(), c);
+    const nk = normalizeName(c.name);
+    if (nk) {
+      const amtKey = `${nk}|${roundAmt(c.amount)}`;
+      if (!byNameAmt.has(amtKey)) byNameAmt.set(amtKey, c);
+      // byName solo guarda si es único; si hay >1 con mismo nombre, no se usa.
+      if (byName.has(nk)) byName.set(nk, null);
+      else byName.set(nk, c);
+    }
+  }
+
+  // Plan: por cliente, qué vendedor le toca. Si dos filas matchean al
+  // mismo cliente con vendedores distintos, lo marcamos como conflicto y
+  // dejamos el primero.
+  const plan = new Map(); // client.id -> { client, vendor, sources:[fileName] }
+  const noMatch = [];
+  const skippedAlready = [];
+  const conflicts = [];
+  let withoutVendorCol = 0;
+
+  for (const r of parsed) {
+    const vendor = (r.vendedor || "").trim();
+    if (!vendor) { withoutVendorCol++; continue; }
+    let match = null;
+    if (r.referencia) match = byRef.get(r.referencia.trim()) || null;
+    if (!match) {
+      const nk = normalizeName(r.contacto);
+      if (nk) {
+        const k = `${nk}|${roundAmt(r.monto)}`;
+        match = byNameAmt.get(k) || null;
+        if (!match && byName.get(nk)) match = byName.get(nk);
+      }
+    }
+    if (!match) { noMatch.push({ ...r }); continue; }
+    if (match.inherited_from && match.inherited_from.trim()) {
+      skippedAlready.push({ client: match, vendor, current: match.inherited_from, source: r._source });
+      continue;
+    }
+    const existing = plan.get(match.id);
+    if (!existing) {
+      plan.set(match.id, { client: match, vendor, sources: [r._source] });
+    } else if (existing.vendor !== vendor) {
+      conflicts.push({ client: match, first: existing.vendor, second: vendor, source: r._source });
+    } else {
+      existing.sources.push(r._source);
+    }
+  }
+
+  const toApply = Array.from(plan.values());
+  const confirmed = await confirmBackfillPreview({
+    matched: toApply,
+    skippedAlready,
+    conflicts,
+    noMatch,
+    withoutVendorCol,
+    totalRows: parsed.length,
+  });
+  if (!confirmed) return;
+
+  // Agrupa por nombre de vendedor → un UPDATE in(...) por grupo.
+  const byVendor = new Map();
+  for (const p of toApply) {
+    if (!byVendor.has(p.vendor)) byVendor.set(p.vendor, []);
+    byVendor.get(p.vendor).push(p.client.id);
+  }
+  let updated = 0;
+  const errors = [];
+  for (const [vendor, ids] of byVendor) {
+    // Batchear in() en chunks de 500 ids para no romper la URL.
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const { error, count } = await sb.from("clients")
+        .update({ inherited_from: vendor }, { count: "exact" })
+        .in("id", chunk);
+      if (error) errors.push(`${vendor}: ${error.message}`);
+      else updated += count ?? chunk.length;
+    }
+  }
+
+  if (errors.length) {
+    toast(`Backfill con errores: ${errors[0]}`, "error");
+  } else {
+    toast(`Backfill listo: ${updated} clientes actualizados.`, "success");
+  }
+  refresh();
+}
+
+function normalizeName(s) {
+  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().trim().replace(/\s+/g, " ");
+}
+function roundAmt(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "x";
+  return Math.round(v * 100) / 100;
+}
+
+function pickBackfillFiles() {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    const h = document.createElement("h2");
+    h.textContent = "Backfill de origen (heredado de)";
+    modal.appendChild(h);
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.style.margin = "0";
+    note.innerHTML = "Sube los CSV originales. Se buscará la columna <strong>Vendedor</strong> y se poblará <em>Heredado de</em> en los clientes que matcheen. <strong>No se crean ni borran clientes.</strong>";
+    modal.appendChild(note);
+
+    const form = document.createElement("form");
+    const fileLabel = document.createElement("label");
+    fileLabel.textContent = "Archivos CSV / Excel";
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".csv,.xlsx,.xls";
+    fileInput.multiple = true;
+    fileInput.required = true;
+    fileLabel.appendChild(fileInput);
+    form.appendChild(fileLabel);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "ghost"; cancel.textContent = "Cancelar";
+    cancel.onclick = () => { backdrop.remove(); resolve(null); };
+    const submit = document.createElement("button");
+    submit.type = "submit"; submit.textContent = "Analizar";
+    actions.append(cancel, submit);
+    form.appendChild(actions);
+    modal.appendChild(form);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      const files = Array.from(fileInput.files || []);
+      backdrop.remove();
+      resolve(files);
+    };
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve(null); }
+    });
+  });
+}
+
+function confirmBackfillPreview({ matched, skippedAlready, conflicts, noMatch, withoutVendorCol, totalRows }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.style.maxWidth = "640px";
+
+    const h = document.createElement("h2");
+    h.textContent = "Resumen del backfill";
+    modal.appendChild(h);
+
+    const stats = document.createElement("ul");
+    stats.style.lineHeight = "1.7";
+    stats.innerHTML = `
+      <li><strong>${totalRows}</strong> filas leídas en total.</li>
+      <li><strong>${matched.length}</strong> clientes se van a actualizar.</li>
+      <li><strong>${skippedAlready.length}</strong> ya tenían un origen — se <em>omiten</em>.</li>
+      <li><strong>${conflicts.length}</strong> con conflicto (mismo cliente, distintos vendedores en los CSV) — se queda el primero.</li>
+      <li><strong>${noMatch.length}</strong> filas no matchearon ningún cliente.</li>
+      <li><strong>${withoutVendorCol}</strong> filas sin columna Vendedor.</li>
+    `;
+    modal.appendChild(stats);
+
+    // Desglose por vendedor para que vea qué se va a aplicar.
+    if (matched.length) {
+      const grouped = new Map();
+      for (const m of matched) grouped.set(m.vendor, (grouped.get(m.vendor) || 0) + 1);
+      const breakdown = document.createElement("details");
+      breakdown.style.margin = "8px 0";
+      const sum = document.createElement("summary");
+      sum.textContent = `Por vendedor original (${grouped.size})`;
+      sum.style.cursor = "pointer";
+      breakdown.appendChild(sum);
+      const ul = document.createElement("ul");
+      for (const [v, n] of [...grouped].sort((a,b) => b[1]-a[1])) {
+        const li = document.createElement("li");
+        li.textContent = `${v}: ${n}`;
+        ul.appendChild(li);
+      }
+      breakdown.appendChild(ul);
+      modal.appendChild(breakdown);
+    }
+
+    if (noMatch.length) {
+      const det = document.createElement("details");
+      const sum = document.createElement("summary");
+      sum.textContent = `Filas sin match (${noMatch.length})`;
+      sum.style.cursor = "pointer";
+      det.appendChild(sum);
+      const ul = document.createElement("ul");
+      ul.style.maxHeight = "180px";
+      ul.style.overflow = "auto";
+      for (const r of noMatch.slice(0, 200)) {
+        const li = document.createElement("li");
+        li.textContent = `${r.contacto || "—"} · ref:${r.referencia || "—"} · vend:${r.vendedor}`;
+        ul.appendChild(li);
+      }
+      det.appendChild(ul);
+      modal.appendChild(det);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "ghost"; cancel.textContent = "Cancelar";
+    cancel.onclick = () => { backdrop.remove(); resolve(false); };
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.textContent = `Aplicar a ${matched.length}`;
+    apply.disabled = matched.length === 0;
+    apply.onclick = () => { backdrop.remove(); resolve(true); };
+    actions.append(cancel, apply);
+    modal.appendChild(actions);
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener("click", (ev) => {
+      if (ev.target === backdrop) { backdrop.remove(); resolve(false); }
+    });
+  });
+}
+
 function clientStatus(client, conciliado) {
   if (client.status) {
     switch (client.status) {

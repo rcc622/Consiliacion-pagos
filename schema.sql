@@ -58,6 +58,7 @@ create table if not exists public.clients (
   anticipo_date  date,
   dup_ok         boolean not null default false,
   medidor_bidi   boolean not null default false,
+  inherited_from text,
   created_at     timestamptz not null default now()
 );
 
@@ -78,6 +79,7 @@ alter table public.clients add column if not exists anticipo_form  text;
 alter table public.clients add column if not exists anticipo_date  date;
 alter table public.clients add column if not exists dup_ok         boolean not null default false;
 alter table public.clients add column if not exists medidor_bidi   boolean not null default false;
+alter table public.clients add column if not exists inherited_from text;
 
 create index if not exists clients_vendor_idx on public.clients(vendor_id);
 create index if not exists clients_zone_idx   on public.clients(zone);

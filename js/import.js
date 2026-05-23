@@ -23,6 +23,30 @@ export async function parseFile(file) {
   return rows.map(normalizeRow).filter((r) => r._hasContent);
 }
 
+// Parser dedicado al backfill de `inherited_from`. NO crea ni borra clientes:
+// solo extrae [{ referencia, contacto, monto, vendedor }] para que el caller
+// los matchee contra la BD y actualice un campo. La columna del vendedor en
+// los CSV originales se llama "Vendedor" (col F del archivo de cartera).
+export async function parseForBackfill(file) {
+  if (!window.XLSX) throw new Error("SheetJS no está disponible.");
+  const buf = await file.arrayBuffer();
+  const wb  = window.XLSX.read(buf, { type: "array", codepage: 65001 });
+  const ws  = wb.Sheets[wb.SheetNames[0]];
+  const raw = window.XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
+  const out = [];
+  for (const row of raw) {
+    const n = {};
+    for (const k of Object.keys(row)) n[normalizeKey(k)] = String(row[k]).trim();
+    const contacto  = n.contacto || n.cliente || n.nombre || "";
+    const referencia = n.referencia || "";
+    const vendedor   = n.vendedor || n.vendedor_nombre || "";
+    const monto      = n.total_en_moneda_firmado || n.total_firmado || n.monto_firmado || n.monto || "";
+    if (!contacto && !referencia) continue;
+    out.push({ contacto, referencia, vendedor, monto: parseAmount(monto) });
+  }
+  return out;
+}
+
 function normalizeKey(k) {
   return String(k)
     .normalize("NFD")

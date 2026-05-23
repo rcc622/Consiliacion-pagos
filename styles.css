@@ -589,6 +589,14 @@ td.vendor-asesor {
   font-size: 12px;
   color: var(--text);
 }
+.client-info-grid .info-readonly {
+  padding: 6px 0;
+  font-size: 13px;
+}
+.origin-inherited {
+  font-weight: 600;
+  color: var(--warning);
+}
 .client-info-grid .modal-notes-editor {
   font: inherit;
   width: 100%;
