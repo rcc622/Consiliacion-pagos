@@ -57,7 +57,7 @@ const CLIENT_COLS = [
   { key: "conciliado", label: "Conciliado",     type: "number", filterable: true, value: (c, ctx) => Number(ctx.reportFor(c)?.total_amount || 0) },
   { key: "status",     label: "Estado",         type: "string", filterable: true, value: (c, ctx) => ctx.statusLabel(c) },
   { key: "notes",      label: "Notas",          type: "string", filterable: true, value: (c) => c.notes || "" },
-  { key: "inherited",  label: "Heredado de",    type: "string", filterable: true, value: (c) => c.inherited_from || "" },
+  { key: "inherited",  label: "Heredado",       type: "string", filterable: true, value: (c) => c.inherited_from || "" },
 ];
 
 const FILTERABLE_COLS = CLIENT_COLS.filter((c) => c.filterable);

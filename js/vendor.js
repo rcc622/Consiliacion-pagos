@@ -96,7 +96,7 @@ function paintTable(container, clients, reports, profile, refresh) {
   thead.innerHTML = `
     <tr>
       <th>Cliente</th>
-      <th>Origen</th>
+      <th>Heredado</th>
       <th>Método de pago</th>
       <th>Monto Proyecto</th>
       <th>Conciliado</th>
