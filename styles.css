@@ -808,32 +808,14 @@ a.row-link {
 }
 a.row-link:hover { text-decoration: underline; }
 
-/* Layout en columna con scroll independiente: el modal no scrollea, solo
-   sus dos áreas internas (datos del cliente y tabla de pagos). Header y
-   footer siempre visibles. */
+/* Modal de detalle: scroll único en el contenedor (no scroll independiente
+   en secciones internas). El layout es flex-column para que header/footer
+   queden en su lugar, pero todo el modal scrollea como un solo bloque. */
 .modal.detail-modal {
   width: 720px;
   max-width: 92vw;
-  height: 86vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-/* Por default cada sección directa mantiene su tamaño natural. */
-.detail-modal > * { flex: 0 0 auto; }
-/* Datos del cliente: scroll interno si superan el alto reservado.
-   Así no empujan la tabla de pagos fuera del viewport. */
-.detail-modal > .client-info-grid {
-  flex: 0 1 auto;
-  max-height: 38vh;
+  max-height: 86vh;
   overflow-y: auto;
-}
-/* Tabla de pagos: ocupa el espacio restante y scrollea internamente. */
-.detail-modal > .detail-schedule {
-  flex: 1 1 0;
-  min-height: 120px;
-  overflow-y: auto;
-  max-height: none;
 }
 
 .detail-header {
@@ -899,9 +881,6 @@ a.row-link:hover { text-decoration: underline; }
 
 .detail-schedule {
   margin-top: 4px;
-  /* max-height + overflow lo maneja .detail-modal > .detail-schedule via flex.
-     Se mantiene como fallback si se usa fuera del modal. */
-  overflow-y: auto;
 }
 .detail-schedule thead th {
   position: sticky;
@@ -953,6 +932,14 @@ a.row-link:hover { text-decoration: underline; }
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
 }
+/* Bloquea el scroll del fondo cuando hay un modal abierto. Soportado en
+   Chrome/Safari/Firefox modernos (`:has()` desde 2023). Sin este lock, al
+   scrollear dentro de la modal "se cuela" el scroll hacia la tabla detrás
+   y queda muy confuso, sobre todo en pantallas chicas. */
+html:has(.modal-backdrop),
+body:has(.modal-backdrop) {
+  overflow: hidden;
+}
 .modal {
   background: var(--surface);
   border-radius: 8px;
@@ -994,18 +981,15 @@ a.row-link:hover { text-decoration: underline; }
 }
 
 /* === Optimizaciones para pantallas de baja resolución vertical ===========
-   El modal usa height (no max-height) con scroll interno independiente en
-   datos del cliente y tabla de pagos. Aquí solo ajustamos tipografías,
-   paddings y los reparts de espacio entre las dos áreas de scroll. */
+   Un solo scroll en el modal: solo ajustamos tipografías, paddings y la
+   altura máxima para aprovechar el viewport. */
 
 @media (max-height: 800px) {
   .modal.detail-modal {
-    height: 94vh;
+    max-height: 94vh;
     padding: 14px 18px;
     gap: 8px;
   }
-  .detail-modal > .client-info-grid { max-height: 34vh; }
-  .detail-modal > .detail-schedule  { min-height: 100px; }
   .detail-modal .summary { margin-bottom: 6px; }
   .detail-modal .summary .stat { padding: 6px 10px; }
   .detail-modal .summary .stat .label { font-size: 10px; }
@@ -1023,12 +1007,10 @@ a.row-link:hover { text-decoration: underline; }
 
 @media (max-height: 600px) {
   .modal.detail-modal {
-    height: 96vh;
+    max-height: 96vh;
     padding: 10px 14px;
     gap: 6px;
   }
-  .detail-modal > .client-info-grid { max-height: 30vh; }
-  .detail-modal > .detail-schedule  { min-height: 80px; }
   .detail-header { margin-bottom: 0; }
   .detail-header h2 { font-size: 16px; }
   .mode-toggle { font-size: 11px; padding: 3px 8px; }
